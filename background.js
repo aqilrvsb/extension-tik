@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.4.0 - Auto-retry failed orders (up to 3 attempts)
+ * v2.5.0 - Excel XLSX export support
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -9,8 +9,11 @@
  * 4. Click reveal buttons to unmask data
  * 5. Extract customer data
  * 6. Store in chrome.storage.local (persistent)
- * 7. Export to CSV anytime
+ * 7. Export to CSV or XLSX anytime
  */
+
+// Import SheetJS library for XLSX export
+importScripts('lib/xlsx.full.min.js');
 
 // Constants
 const MAX_RETRIES = 3;
@@ -60,8 +63,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(getStatus());
       return false;
 
-    case 'DOWNLOAD_EXCEL':
-      downloadExcel().then(sendResponse);
+    case 'DOWNLOAD_CSV':
+      downloadCSV().then(sendResponse);
+      return true;
+
+    case 'DOWNLOAD_XLSX':
+      downloadXLSX().then(sendResponse);
       return true;
 
     case 'ORDER_IDS_COLLECTED':
@@ -608,10 +615,46 @@ async function handleOrderFailed(orderId, reason) {
 }
 
 /**
+ * Get order data headers
+ */
+function getExportHeaders() {
+  return [
+    'Order ID',
+    'Shipping Method',
+    'Payment Method',
+    'Total',
+    'Item (Full)',
+    'SKU ID',
+    'Customer Name',
+    'Customer Phone',
+    'Customer Address',
+    'Date Order'
+  ];
+}
+
+/**
+ * Get order data rows (without CSV quoting)
+ */
+function getExportRows(orders) {
+  return orders.map(row => [
+    row.order_id || '',
+    row.shipping_method || '',
+    row.payment_method || '',
+    `${row.currency || 'MYR'} ${row.total_amount || 0}`,
+    row.items || '',
+    row.sku_id || '',
+    row.customer_name || '',
+    row.phone_number || '',
+    row.full_address || '',
+    row.order_date || ''
+  ]);
+}
+
+/**
  * Download collected data as CSV
  * Note: Service workers don't have URL.createObjectURL, so we use data URL
  */
-async function downloadExcel() {
+async function downloadCSV() {
   const storage = await chrome.storage.local.get(['exportedOrders']);
   const allOrders = storage.exportedOrders || [];
 
@@ -620,35 +663,17 @@ async function downloadExcel() {
   }
 
   try {
-    const headers = [
-      'Order ID',
-      'Shipping Method',
-      'Payment Method',
-      'Total',
-      'Item (Full)',
-      'SKU ID',
-      'Customer Name',
-      'Customer Phone',
-      'Customer Address',
-      'Date Order'
-    ];
+    const headers = getExportHeaders();
+    const rows = getExportRows(allOrders);
 
-    const rows = allOrders.map(row => [
-      row.order_id,
-      `"${(row.shipping_method || '').replace(/"/g, '""')}"`,
-      `"${(row.payment_method || '').replace(/"/g, '""')}"`,
-      `${row.currency || 'MYR'} ${row.total_amount || 0}`,
-      `"${(row.items || '').replace(/"/g, '""')}"`,
-      `"${(row.sku_id || '').replace(/"/g, '""')}"`,
-      `"${(row.customer_name || '').replace(/"/g, '""')}"`,
-      row.phone_number || '',
-      `"${(row.full_address || '').replace(/"/g, '""')}"`,
-      row.order_date || ''
-    ]);
+    // CSV format with proper quoting
+    const csvRows = rows.map(row =>
+      row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')
+    );
 
     const csvContent = [
-      headers.join(','),
-      ...rows.map(row => row.join(','))
+      headers.map(h => `"${h}"`).join(','),
+      ...csvRows
     ].join('\n');
 
     // Add BOM for Excel UTF-8 compatibility and encode as base64 data URL
@@ -670,7 +695,69 @@ async function downloadExcel() {
     log(`Downloaded ${filename} (${allOrders.length} orders)`);
     return { success: true, filename, count: allOrders.length };
   } catch (error) {
-    log('Download error: ' + error.message, 'error');
+    log('CSV download error: ' + error.message, 'error');
+    return { error: error.message };
+  }
+}
+
+/**
+ * Download collected data as Excel XLSX
+ * Uses SheetJS library
+ */
+async function downloadXLSX() {
+  const storage = await chrome.storage.local.get(['exportedOrders']);
+  const allOrders = storage.exportedOrders || [];
+
+  if (allOrders.length === 0) {
+    return { error: 'No data to download' };
+  }
+
+  try {
+    const headers = getExportHeaders();
+    const rows = getExportRows(allOrders);
+
+    // Create worksheet data (headers + rows)
+    const wsData = [headers, ...rows];
+
+    // Create worksheet
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Set column widths for better readability
+    ws['!cols'] = [
+      { wch: 20 },  // Order ID
+      { wch: 15 },  // Shipping Method
+      { wch: 15 },  // Payment Method
+      { wch: 12 },  // Total
+      { wch: 40 },  // Item (Full)
+      { wch: 15 },  // SKU ID
+      { wch: 25 },  // Customer Name
+      { wch: 15 },  // Customer Phone
+      { wch: 50 },  // Customer Address
+      { wch: 12 }   // Date Order
+    ];
+
+    // Create workbook
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Orders');
+
+    // Generate XLSX binary
+    const xlsxBinary = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
+
+    // Create data URL
+    const dataUrl = `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${xlsxBinary}`;
+
+    const filename = `tiktok_orders_${new Date().toISOString().split('T')[0]}_${allOrders.length}orders.xlsx`;
+
+    await chrome.downloads.download({
+      url: dataUrl,
+      filename: filename,
+      saveAs: true
+    });
+
+    log(`Downloaded ${filename} (${allOrders.length} orders)`);
+    return { success: true, filename, count: allOrders.length };
+  } catch (error) {
+    log('XLSX download error: ' + error.message, 'error');
     return { error: error.message };
   }
 }
@@ -731,4 +818,4 @@ function sleep(ms) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.4.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.5.0');

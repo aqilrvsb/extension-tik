@@ -1,6 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.4.0 - Auto-retry failed orders (up to 3 attempts)
+ * v2.5.0 - Excel XLSX export support
  */
 
 // Supabase config for license validation
@@ -24,7 +24,8 @@ const remainingCount = document.getElementById('remainingCount');
 const startBtn = document.getElementById('startBtn');
 const runningBtns = document.getElementById('runningBtns');
 const stopBtn = document.getElementById('stopBtn');
-const downloadBtn = document.getElementById('downloadBtn');
+const downloadCsvBtn = document.getElementById('downloadCsvBtn');
+const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');
 const maxOrdersInput = document.getElementById('maxOrders');
 const delayMinInput = document.getElementById('delayMin');
 const delayMaxInput = document.getElementById('delayMax');
@@ -32,7 +33,8 @@ const logSection = document.getElementById('logSection');
 const historySection = document.getElementById('historySection');
 const historyInfo = document.getElementById('historyInfo');
 const resumeBtn = document.getElementById('resumeBtn');
-const historyDownloadBtn = document.getElementById('historyDownloadBtn');
+const historyCsvBtn = document.getElementById('historyCsvBtn');
+const historyXlsxBtn = document.getElementById('historyXlsxBtn');
 const settingsSection = document.getElementById('settingsSection');
 const storageCount = document.getElementById('storageCount');
 const clearStorageBtn = document.getElementById('clearStorageBtn');
@@ -530,9 +532,9 @@ stopBtn.addEventListener('click', () => {
   });
 });
 
-// Download button click (during processing or after)
-downloadBtn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'DOWNLOAD_EXCEL' }, (response) => {
+// Download CSV button click (during processing or after)
+downloadCsvBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'DOWNLOAD_CSV' }, (response) => {
     if (response && response.success) {
       addLog(`Exported ${response.count} orders to CSV!`, 'success');
     } else if (response && response.error) {
@@ -541,11 +543,33 @@ downloadBtn.addEventListener('click', () => {
   });
 });
 
-// History download button click
-historyDownloadBtn.addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type: 'DOWNLOAD_EXCEL' }, (response) => {
+// Download XLSX button click (during processing or after)
+downloadXlsxBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'DOWNLOAD_XLSX' }, (response) => {
+    if (response && response.success) {
+      addLog(`Exported ${response.count} orders to Excel!`, 'success');
+    } else if (response && response.error) {
+      addLog('Download error: ' + response.error, 'error');
+    }
+  });
+});
+
+// History CSV download button click
+historyCsvBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'DOWNLOAD_CSV' }, (response) => {
     if (response && response.success) {
       addLog(`Exported ${response.count} orders to CSV!`, 'success');
+    } else if (response && response.error) {
+      addLog('Download error: ' + response.error, 'error');
+    }
+  });
+});
+
+// History XLSX download button click
+historyXlsxBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'DOWNLOAD_XLSX' }, (response) => {
+    if (response && response.success) {
+      addLog(`Exported ${response.count} orders to Excel!`, 'success');
     } else if (response && response.error) {
       addLog('Download error: ' + response.error, 'error');
     }
