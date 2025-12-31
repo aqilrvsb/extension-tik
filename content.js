@@ -36,7 +36,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Collect order IDs from the shipped orders list page
- * With pagination support - clicks page numbers to collect more orders
  */
 async function collectOrderIds(maxOrders = 100) {
   console.log('[Content] Collecting order IDs, max:', maxOrders);
@@ -46,55 +45,13 @@ async function collectOrderIds(maxOrders = 100) {
   // Wait for page to load
   await sleep(2000);
 
-  // Calculate how many pages needed (20 orders per page)
-  const pagesNeeded = Math.ceil(maxOrders / 20);
-  console.log('[Content] Will try to collect from', pagesNeeded, 'pages');
-
-  // Collect from page 1 first
-  collectOrdersFromCurrentPage(orderIds, maxOrders);
-  console.log('[Content] Page 1 - Collected', orderIds.length, 'orders');
-
-  // Navigate through more pages if needed
-  for (let page = 2; page <= pagesNeeded && orderIds.length < maxOrders; page++) {
-    console.log('[Content] Navigating to page', page);
-
-    // Try to click the page number
-    const clicked = await clickPageNumber(page);
-
-    if (!clicked) {
-      console.log('[Content] Could not find page', page, '- stopping');
-      break;
-    }
-
-    // Wait for page to load
-    await sleep(2000);
-
-    // Collect orders from this page
-    const beforeCount = orderIds.length;
-    collectOrdersFromCurrentPage(orderIds, maxOrders);
-    const newOrders = orderIds.length - beforeCount;
-    console.log('[Content] Page', page, '- Found', newOrders, 'new orders, total:', orderIds.length);
-
-    // If no new orders found, stop
-    if (newOrders === 0) {
-      console.log('[Content] No new orders on page', page, '- stopping');
-      break;
-    }
-  }
-
-  console.log('[Content] Collected', orderIds.length, 'order IDs total');
-  return orderIds;
-}
-
-/**
- * Collect orders from current page view (helper function)
- */
-function collectOrdersFromCurrentPage(orderIds, maxOrders) {
+  // Method 1: Find order links/rows in the table
+  // TikTok order IDs are typically 18-digit numbers
   const orderPattern = /\d{17,19}/g;
 
-  // Method 1: Find order links
+  // Look for order IDs in the page
+  // They appear in order links, order number displays, etc.
   const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
-  console.log('[Content] Found', orderLinks.length, 'order links on page');
 
   for (const link of orderLinks) {
     const href = link.href || '';
@@ -103,96 +60,52 @@ function collectOrdersFromCurrentPage(orderIds, maxOrders) {
       for (const match of matches) {
         if (!orderIds.includes(match) && match.length >= 17) {
           orderIds.push(match);
-          if (orderIds.length >= maxOrders) return;
+          if (orderIds.length >= maxOrders) break;
         }
       }
     }
+    if (orderIds.length >= maxOrders) break;
   }
 
   // Method 2: Look for order IDs in table cells
-  const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
-  for (const cell of cells) {
-    const text = cell.textContent || '';
-    const matches = text.match(orderPattern);
-    if (matches) {
-      for (const match of matches) {
-        if (!orderIds.includes(match) && match.length >= 17 && match.length <= 19) {
-          orderIds.push(match);
-          if (orderIds.length >= maxOrders) return;
+  if (orderIds.length < maxOrders) {
+    const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
+    for (const cell of cells) {
+      const text = cell.textContent || '';
+      const matches = text.match(orderPattern);
+      if (matches) {
+        for (const match of matches) {
+          if (!orderIds.includes(match) && match.length >= 17 && match.length <= 19) {
+            orderIds.push(match);
+            if (orderIds.length >= maxOrders) break;
+          }
         }
       }
+      if (orderIds.length >= maxOrders) break;
     }
   }
 
-  // Method 3: Look in checkbox values
-  const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-  for (const checkbox of checkboxes) {
-    const value = checkbox.value || checkbox.dataset.orderId || '';
-    const matches = value.match(orderPattern);
-    if (matches) {
-      for (const match of matches) {
-        if (!orderIds.includes(match) && match.length >= 17) {
-          orderIds.push(match);
-          if (orderIds.length >= maxOrders) return;
+  // Method 3: Look in checkbox values or data attributes
+  if (orderIds.length < maxOrders) {
+    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+    for (const checkbox of checkboxes) {
+      const value = checkbox.value || checkbox.dataset.orderId || '';
+      const matches = value.match(orderPattern);
+      if (matches) {
+        for (const match of matches) {
+          if (!orderIds.includes(match) && match.length >= 17) {
+            orderIds.push(match);
+            if (orderIds.length >= maxOrders) break;
+          }
         }
       }
+      if (orderIds.length >= maxOrders) break;
     }
   }
 
-  // Method 4: Scan full page text for TikTok order IDs (start with 5)
-  const pageText = document.body.innerText;
-  const allMatches = pageText.match(/\b5\d{17}\b/g);
-  if (allMatches) {
-    for (const match of allMatches) {
-      if (!orderIds.includes(match)) {
-        orderIds.push(match);
-        if (orderIds.length >= maxOrders) return;
-      }
-    }
-  }
+  console.log('[Content] Collected', orderIds.length, 'order IDs');
+  return orderIds;
 }
-
-/**
- * Click a specific page number in pagination
- */
-async function clickPageNumber(pageNum) {
-  // Method 1: Look for pagination items with the page number
-  const pageButtons = document.querySelectorAll(
-    '.arco-pagination-item, ' +
-    '[class*="pagination"] li, ' +
-    '[class*="pagination"] button, ' +
-    '[class*="pager"] li, ' +
-    '[class*="pager"] button'
-  );
-
-  for (const btn of pageButtons) {
-    const text = btn.textContent?.trim();
-    if (text === String(pageNum)) {
-      console.log('[Content] Clicking page button:', pageNum);
-      btn.click();
-      return true;
-    }
-  }
-
-  // Method 2: Find any element with just the page number
-  const allElements = document.querySelectorAll('li, button, a, span');
-  for (const el of allElements) {
-    const text = el.textContent?.trim();
-    if (text === String(pageNum) && el.offsetParent !== null) {
-      // Check if it's in a pagination area
-      const parent = el.closest('[class*="pagination"], [class*="pager"]');
-      if (parent) {
-        console.log('[Content] Clicking page element:', pageNum);
-        el.click();
-        return true;
-      }
-    }
-  }
-
-  console.log('[Content] Page button', pageNum, 'not found');
-  return false;
-}
-
 
 /**
  * Extract order data from detail page
