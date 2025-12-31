@@ -98,6 +98,16 @@
       color: #666;
     }
 
+    .time-estimate {
+      text-align: center;
+      font-size: 11px;
+      color: #667eea;
+      margin-top: 6px;
+      padding: 4px 8px;
+      background: rgba(102, 126, 234, 0.1);
+      border-radius: 4px;
+    }
+
     .stats-grid {
       display: grid;
       grid-template-columns: 1fr 1fr 1fr 1fr;
@@ -389,6 +399,127 @@
       background: #dc3545;
       color: white;
     }
+
+    /* License Modal Styles */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.6);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+
+    .modal-overlay.show {
+      display: flex;
+    }
+
+    .modal-content {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      width: 340px;
+      max-width: 90%;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    }
+
+    .modal-header {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+
+    .modal-header h2 {
+      font-size: 18px;
+      color: #333;
+      margin-bottom: 5px;
+    }
+
+    .modal-header p {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .license-input {
+      width: 100%;
+      padding: 12px;
+      border: 2px solid #ddd;
+      border-radius: 8px;
+      font-size: 16px;
+      font-family: monospace;
+      text-align: center;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      margin-bottom: 15px;
+    }
+
+    .license-input:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+
+    .license-input.error {
+      border-color: #dc3545;
+    }
+
+    .license-input.success {
+      border-color: #28a745;
+    }
+
+    .license-error {
+      color: #dc3545;
+      font-size: 12px;
+      text-align: center;
+      margin-bottom: 10px;
+      display: none;
+    }
+
+    .license-error.show {
+      display: block;
+    }
+
+    .license-info {
+      background: #f0f7ff;
+      padding: 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #0066cc;
+      margin-bottom: 15px;
+      text-align: center;
+    }
+
+    .license-status {
+      text-align: center;
+      padding: 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      margin-bottom: 15px;
+      display: none;
+    }
+
+    .license-status.valid {
+      display: block;
+      background: #d4edda;
+      color: #155724;
+    }
+
+    .license-status.invalid {
+      display: block;
+      background: #f8d7da;
+      color: #721c24;
+    }
+
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .modal-actions .btn {
+      flex: 1;
+    }
   </style>
 </head>
 <body>
@@ -412,6 +543,9 @@
         <div class="progress-stats">
           <span id="progressText">0 / 0 orders</span>
           <span id="progressPercent">0%</span>
+        </div>
+        <div class="time-estimate" id="timeEstimate" style="display: none;">
+          <span id="timeRemaining">~0 min remaining</span>
         </div>
       </div>
 
@@ -499,7 +633,42 @@
     </div>
 
     <div class="footer">
-      v2.1.9 - Dynamic Order Count
+      v2.3.0 - Faster Pagination
+    </div>
+  </div>
+
+  <!-- License Modal -->
+  <div class="modal-overlay" id="licenseModal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2>Enter License Key</h2>
+        <p>Please enter your license key to activate the extension</p>
+      </div>
+
+      <input
+        type="text"
+        class="license-input"
+        id="licenseInput"
+        placeholder="XXXX-XXXX-XXXX-XXXX"
+        maxlength="19"
+      >
+
+      <div class="license-error" id="licenseError">
+        Invalid license key
+      </div>
+
+      <div class="license-info">
+        License is tied to your TikTok Shop Code. Contact admin to get your license key.
+      </div>
+
+      <div class="license-status" id="licenseStatus"></div>
+
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="cancelLicenseBtn">Cancel</button>
+        <button class="btn btn-primary" id="validateLicenseBtn">
+          <span>🔓</span> Activate
+        </button>
+      </div>
     </div>
   </div>
 

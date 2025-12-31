@@ -1,7 +1,11 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.0.0 - With resume, progress during run, and delay range
+ * v2.3.0 - Faster pagination + time estimation
  */
+
+// Supabase config for license validation
+const SUPABASE_URL = 'https://rfvocvjwlxpiaxbciqnn.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdm9jdmp3bHhwaWF4YmNpcW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODY5ODgsImV4cCI6MjA4MTg2Mjk4OH0.dn5sIWgnBO_Ey3X0iL-4cKhXjQvZr4pjTo3iI0bMYkQ';
 
 // DOM Elements
 const statusIcon = document.getElementById('statusIcon');
@@ -34,8 +38,314 @@ const storageCount = document.getElementById('storageCount');
 const clearStorageBtn = document.getElementById('clearStorageBtn');
 const openDashboardBtn = document.getElementById('openDashboardBtn');
 
+// License modal elements
+const licenseModal = document.getElementById('licenseModal');
+const licenseInput = document.getElementById('licenseInput');
+const licenseError = document.getElementById('licenseError');
+const licenseStatus = document.getElementById('licenseStatus');
+const validateLicenseBtn = document.getElementById('validateLicenseBtn');
+const cancelLicenseBtn = document.getElementById('cancelLicenseBtn');
+
 // State
 let isRunning = false;
+let pendingStartAction = null; // Store pending start action after license validation
+let exportStartTime = null; // Track when export started for time estimation
+
+// Time estimate elements
+const timeEstimate = document.getElementById('timeEstimate');
+const timeRemaining = document.getElementById('timeRemaining');
+
+// ========================================
+// LICENSE VALIDATION FUNCTIONS
+// ========================================
+
+/**
+ * Get the current shop code from the active TikTok Seller Center tab
+ */
+async function getCurrentShopCode() {
+  return new Promise((resolve) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
+      const tab = tabs[0];
+      if (!tab || !tab.url || !tab.url.includes('seller')) {
+        resolve(null);
+        return;
+      }
+
+      try {
+        // Execute script to get shop code from page
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // Method 1: Look for Shop Code text
+            const shopCodeMatch = document.body.innerText.match(/Shop Code:\s*([A-Z0-9]+)/i);
+            if (shopCodeMatch) return shopCodeMatch[1];
+
+            // Method 2: Look in URL params
+            const urlMatch = window.location.href.match(/shop_code=([A-Z0-9]+)/i);
+            if (urlMatch) return urlMatch[1];
+
+            // Method 3: Look for data attribute or specific element
+            const shopElement = document.querySelector('[data-shop-code]');
+            if (shopElement) return shopElement.getAttribute('data-shop-code');
+
+            // Method 4: Look in page HTML for MYLCV0LW98 pattern (TikTok shop codes)
+            const pageHtml = document.body.innerHTML;
+            const codePattern = pageHtml.match(/MY[A-Z0-9]{8,}/);
+            if (codePattern) return codePattern[0];
+
+            return null;
+          }
+        });
+
+        resolve(results[0]?.result || null);
+      } catch (error) {
+        console.error('Error getting shop code:', error);
+        resolve(null);
+      }
+    });
+  });
+}
+
+/**
+ * Validate license key against Supabase
+ */
+async function validateLicense(licenseKey, shopCode) {
+  try {
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/licenses?license_key=eq.${encodeURIComponent(licenseKey)}&select=*`,
+      {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      }
+    );
+
+    if (!response.ok) {
+      return { valid: false, error: 'Failed to validate license' };
+    }
+
+    const licenses = await response.json();
+
+    if (licenses.length === 0) {
+      return { valid: false, error: 'License key not found' };
+    }
+
+    const license = licenses[0];
+
+    // Check if license is active
+    if (!license.is_active) {
+      return { valid: false, error: 'License has been disabled' };
+    }
+
+    // Check if license is expired
+    const now = new Date();
+    const validFrom = new Date(license.valid_from);
+    const validUntil = new Date(license.valid_until);
+
+    if (now < validFrom) {
+      return { valid: false, error: 'License not yet valid' };
+    }
+
+    if (now > validUntil) {
+      return { valid: false, error: 'License has expired' };
+    }
+
+    // Check if shop code matches (if we have shop code)
+    if (shopCode && license.shop_code !== shopCode) {
+      return {
+        valid: false,
+        error: `License is for shop ${license.shop_code}, not ${shopCode}`
+      };
+    }
+
+    // Calculate days remaining
+    const daysRemaining = Math.ceil((validUntil - now) / (1000 * 60 * 60 * 24));
+
+    return {
+      valid: true,
+      license: license,
+      daysRemaining: daysRemaining,
+      shopCode: license.shop_code
+    };
+  } catch (error) {
+    console.error('License validation error:', error);
+    return { valid: false, error: 'Network error. Please try again.' };
+  }
+}
+
+/**
+ * Check if we have a valid cached license
+ */
+async function checkCachedLicense() {
+  const storage = await chrome.storage.local.get(['licenseData']);
+  const licenseData = storage.licenseData;
+
+  if (!licenseData) return null;
+
+  // Check if cache is still valid (24 hours)
+  const cacheTime = new Date(licenseData.cachedAt);
+  const now = new Date();
+  const hoursSinceCached = (now - cacheTime) / (1000 * 60 * 60);
+
+  if (hoursSinceCached > 24) {
+    // Cache expired, need to revalidate
+    return null;
+  }
+
+  // Check if license itself is still valid
+  const validUntil = new Date(licenseData.validUntil);
+  if (now > validUntil) {
+    return null;
+  }
+
+  return licenseData;
+}
+
+/**
+ * Save license to cache
+ */
+async function cacheLicense(licenseKey, validUntil, shopCode) {
+  await chrome.storage.local.set({
+    licenseData: {
+      licenseKey: licenseKey,
+      validUntil: validUntil,
+      shopCode: shopCode,
+      cachedAt: new Date().toISOString()
+    }
+  });
+}
+
+/**
+ * Show license modal
+ */
+function showLicenseModal() {
+  licenseModal.classList.add('show');
+  licenseInput.value = '';
+  licenseInput.classList.remove('error', 'success');
+  licenseError.classList.remove('show');
+  licenseStatus.className = 'license-status';
+  licenseStatus.textContent = '';
+  licenseInput.focus();
+}
+
+/**
+ * Hide license modal
+ */
+function hideLicenseModal() {
+  licenseModal.classList.remove('show');
+  pendingStartAction = null;
+}
+
+/**
+ * Check license before starting export
+ * Returns true if license is valid, false otherwise
+ */
+async function checkLicenseBeforeStart() {
+  // First check cached license
+  const cachedLicense = await checkCachedLicense();
+
+  if (cachedLicense) {
+    // Get current shop code to verify
+    const currentShopCode = await getCurrentShopCode();
+
+    // If we can't get shop code, allow with warning
+    if (!currentShopCode) {
+      console.log('[License] Could not detect shop code, using cached license');
+      return true;
+    }
+
+    // Verify shop code matches
+    if (cachedLicense.shopCode === currentShopCode) {
+      console.log('[License] Using cached license for shop:', currentShopCode);
+      return true;
+    } else {
+      // Shop code mismatch, need new license
+      console.log('[License] Shop code mismatch, need new license');
+      showLicenseModal();
+      return false;
+    }
+  }
+
+  // No valid cache, show license modal
+  showLicenseModal();
+  return false;
+}
+
+// License modal event handlers
+validateLicenseBtn.addEventListener('click', async () => {
+  const licenseKey = licenseInput.value.trim().toUpperCase();
+
+  if (!licenseKey || licenseKey.length < 15) {
+    licenseInput.classList.add('error');
+    licenseError.textContent = 'Please enter a valid license key';
+    licenseError.classList.add('show');
+    return;
+  }
+
+  // Show loading state
+  validateLicenseBtn.disabled = true;
+  validateLicenseBtn.innerHTML = '<span>⏳</span> Validating...';
+
+  // Get current shop code
+  const shopCode = await getCurrentShopCode();
+
+  // Validate license
+  const result = await validateLicense(licenseKey, shopCode);
+
+  validateLicenseBtn.disabled = false;
+  validateLicenseBtn.innerHTML = '<span>🔓</span> Activate';
+
+  if (result.valid) {
+    // Success!
+    licenseInput.classList.remove('error');
+    licenseInput.classList.add('success');
+    licenseStatus.className = 'license-status valid';
+    licenseStatus.textContent = `License valid! ${result.daysRemaining} days remaining`;
+
+    // Cache the license
+    await cacheLicense(licenseKey, result.license.valid_until, result.license.shop_code);
+
+    // Hide modal after a short delay
+    setTimeout(() => {
+      hideLicenseModal();
+
+      // Execute pending action
+      if (pendingStartAction) {
+        pendingStartAction();
+        pendingStartAction = null;
+      }
+    }, 1000);
+  } else {
+    // Failed
+    licenseInput.classList.add('error');
+    licenseInput.classList.remove('success');
+    licenseError.textContent = result.error;
+    licenseError.classList.add('show');
+  }
+});
+
+cancelLicenseBtn.addEventListener('click', () => {
+  hideLicenseModal();
+});
+
+// Format license input (add dashes)
+licenseInput.addEventListener('input', (e) => {
+  let value = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+
+  // Add dashes every 4 characters
+  if (value.length > 4) {
+    value = value.match(/.{1,4}/g).join('-');
+  }
+
+  e.target.value = value.substring(0, 19); // Max 19 chars (XXXX-XXXX-XXXX-XXXX)
+  licenseInput.classList.remove('error');
+  licenseError.classList.remove('show');
+});
+
+// ========================================
+// MAIN FUNCTIONS
+// ========================================
 
 // Initialize on popup open
 async function init() {
@@ -157,6 +467,21 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Start button click
 startBtn.addEventListener('click', async () => {
+  // Check license first
+  const hasValidLicense = await checkLicenseBeforeStart();
+
+  if (!hasValidLicense) {
+    // License check failed, store pending action for after license validation
+    pendingStartAction = () => startExport();
+    return;
+  }
+
+  // License valid, start export
+  startExport();
+});
+
+// Actual start export function
+function startExport() {
   const maxOrders = parseInt(maxOrdersInput.value) || 100;
   const delayMin = parseFloat(delayMinInput.value) || 2;
   const delayMax = parseFloat(delayMaxInput.value) || 6;
@@ -176,7 +501,7 @@ startBtn.addEventListener('click', async () => {
       addLog('Error: ' + response.error, 'error');
     }
   });
-});
+}
 
 // Resume button click
 resumeBtn.addEventListener('click', async () => {
@@ -245,6 +570,30 @@ openDashboardBtn.addEventListener('click', () => {
   chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') });
 });
 
+// Calculate and format time estimate
+function calculateTimeEstimate(processed, total, remaining) {
+  if (!exportStartTime || processed < 2 || remaining <= 0) {
+    return null;
+  }
+
+  const elapsedMs = Date.now() - exportStartTime;
+  const avgTimePerOrder = elapsedMs / processed;
+  const estimatedRemainingMs = avgTimePerOrder * remaining;
+
+  // Format time
+  const totalSeconds = Math.round(estimatedRemainingMs / 1000);
+  if (totalSeconds < 60) {
+    return `~${totalSeconds} sec remaining`;
+  } else if (totalSeconds < 3600) {
+    const minutes = Math.round(totalSeconds / 60);
+    return `~${minutes} min remaining`;
+  } else {
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.round((totalSeconds % 3600) / 60);
+    return `~${hours}h ${minutes}m remaining`;
+  }
+}
+
 // Update UI based on status
 function updateUI(status) {
   isRunning = status.isRunning;
@@ -258,6 +607,11 @@ function updateUI(status) {
     statusText.textContent = status.message || 'Processing orders...';
     statusText.classList.add('running');
 
+    // Track start time for estimation
+    if (!exportStartTime) {
+      exportStartTime = Date.now();
+    }
+
     // Show progress
     progressSection.classList.add('show');
     const totalProcessed = status.processed + status.skipped;
@@ -265,6 +619,13 @@ function updateUI(status) {
     progressFill.style.width = percent + '%';
     progressText.textContent = `${totalProcessed} / ${status.total} orders`;
     progressPercent.textContent = percent + '%';
+
+    // Show time estimate
+    const estimate = calculateTimeEstimate(totalProcessed, status.total, status.remaining);
+    if (estimate && timeEstimate && timeRemaining) {
+      timeEstimate.style.display = 'block';
+      timeRemaining.textContent = estimate;
+    }
 
     // Show current order
     if (status.currentOrderId) {
@@ -283,6 +644,14 @@ function updateUI(status) {
     setRunningState(false);
     statusText.classList.remove('running');
     currentOrder.classList.remove('show');
+
+    // Hide time estimate when not running
+    if (timeEstimate) {
+      timeEstimate.style.display = 'none';
+    }
+
+    // Reset start time
+    exportStartTime = null;
 
     if (status.completed) {
       statusIcon.textContent = '✅';

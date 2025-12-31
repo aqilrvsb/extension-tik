@@ -128,8 +128,8 @@ async function collectOrderIds(maxOrders = 100) {
   const orderPattern = /5\d{16,18}/g;
 
   try {
-    // Wait for page to fully load
-    await sleep(3000);
+    // Wait for page to fully load (reduced from 3000ms)
+    await sleep(1500);
 
     // Check if we're on the right page
     if (!window.location.href.includes('/order')) {
@@ -142,11 +142,11 @@ async function collectOrderIds(maxOrders = 100) {
     const actualMax = Math.min(maxOrders, shippedCount);
     console.log('[Content] Shipped count:', shippedCount, ', Requested:', maxOrders, ', Will collect:', actualMax);
 
-    // Scroll to bottom to ensure pagination is loaded
+    // Scroll to bottom to ensure pagination is loaded (reduced delays)
     window.scrollTo(0, document.body.scrollHeight);
-    await sleep(1500);
+    await sleep(800);
     window.scrollTo(0, 0);
-    await sleep(1000);
+    await sleep(500);
 
     // Calculate pages needed (20 orders per page)
     const pagesNeeded = Math.ceil(actualMax / 20);
@@ -159,18 +159,18 @@ async function collectOrderIds(maxOrders = 100) {
     // If no orders found on page 1, wait more and retry
     if (orderIds.length === 0) {
       console.log('[Content] No orders on page 1, waiting more...');
-      await sleep(3000);
+      await sleep(2000);
       collectOrdersFromPage(orderIds, orderPattern, actualMax);
       console.log('[Content] Page 1 retry:', orderIds.length, 'orders');
     }
 
-    // Go through more pages if needed
+    // Go through more pages if needed (FAST pagination - no API calls, just DOM reads)
     for (let page = 2; page <= pagesNeeded && orderIds.length < actualMax; page++) {
       console.log('[Content] --- Attempting page', page, '---');
 
-      // Scroll to pagination
+      // Scroll to pagination (reduced delay)
       window.scrollTo(0, document.body.scrollHeight);
-      await sleep(1000);
+      await sleep(300);
 
       // Click the page number using aria-label
       const clicked = await clickPage(page);
@@ -179,13 +179,13 @@ async function collectOrderIds(maxOrders = 100) {
         break;
       }
 
-      // Wait for page to load new content
+      // Wait for page to load new content (reduced from 3000ms - pagination is just DOM update)
       console.log('[Content] Waiting for page', page, 'to load...');
-      await sleep(3000);
+      await sleep(1200);
 
-      // Scroll back up to see orders
+      // Scroll back up to see orders (reduced delay)
       window.scrollTo(0, 0);
-      await sleep(1000);
+      await sleep(400);
 
       // Collect orders from this page
       const before = orderIds.length;

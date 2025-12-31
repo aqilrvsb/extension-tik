@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.1.3 - Force stop clears session, auto-resume only for natural interruptions
+ * v2.3.0 - Faster pagination, time estimation
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -640,4 +640,4 @@ function sleep(ms) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.1.3');
+console.log('[TikTok Order Exporter] Background service worker started v2.3.0');
