@@ -67,12 +67,14 @@ async function updateStorageCount() {
 }
 
 // Check for previous interrupted session and auto-resume
+// Note: Force stop (button click) clears session, so this only triggers for natural interruptions
 async function checkPreviousSession() {
   const sessionData = await chrome.storage.local.get(['sessionState']);
   const session = sessionData.sessionState;
 
   if (session && session.orderIds && session.orderIds.length > 0 && session.currentOrderIndex < session.orderIds.length) {
-    // There's an interrupted session - AUTO RESUME
+    // There's an interrupted session (natural interruption, not force stop)
+    // AUTO RESUME since force stop clears session state
     const remaining = session.orderIds.length - session.currentOrderIndex;
     const success = session.success || 0;
     const failed = session.failed || 0;

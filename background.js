@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.1.0 - With pagination, auto-resume with fresh tab, random delay
+ * v2.1.3 - Force stop clears session, auto-resume only for natural interruptions
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -223,17 +223,17 @@ async function handleResume(message) {
 }
 
 /**
- * Handle stop command
+ * Handle stop command (FORCE STOP - no auto-resume)
  */
 async function handleStop() {
   state.shouldStop = true;
   state.isRunning = false;
 
-  // Save session state for resume
-  await saveSessionState();
+  // FORCE STOP: Clear session state so it won't auto-resume
+  await clearSessionState();
 
   broadcastStatus('Export stopped', false, true);
-  log('Export stopped - you can resume later');
+  log('Export force stopped - session cleared');
 }
 
 /**
@@ -628,4 +628,4 @@ function sleep(ms) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.1.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.1.3');
