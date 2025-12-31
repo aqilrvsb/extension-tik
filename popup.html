@@ -347,36 +347,47 @@
       color: rgba(255, 255, 255, 0.7);
     }
 
-    .btn-dashboard {
-      font-size: 12px;
-      color: white;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border: none;
-      cursor: pointer;
-      padding: 8px 16px;
-      border-radius: 6px;
-      font-weight: 600;
-      margin: 8px 0;
-      transition: all 0.2s ease;
+
+    .toolbar-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      margin-top: 8px;
     }
 
-    .btn-dashboard:hover {
+    .toolbar-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: none;
+    }
+
+    .toolbar-btn.dashboard {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .toolbar-btn.dashboard:hover {
       transform: translateY(-1px);
       box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
     }
 
-    .clear-storage-btn {
-      font-size: 11px;
+    .toolbar-btn.clear {
+      background: #fff0f0;
       color: #dc3545;
-      background: none;
-      border: none;
-      cursor: pointer;
-      text-decoration: underline;
-      margin-top: 5px;
+      border: 1px solid #dc3545;
     }
 
-    .clear-storage-btn:hover {
-      color: #c82333;
+    .toolbar-btn.clear:hover {
+      background: #dc3545;
+      color: white;
     }
   </style>
 </head>
@@ -478,10 +489,10 @@
       <!-- Storage Info -->
       <div class="storage-info" id="storageInfo">
         <span id="storageCount">0</span> orders in storage
-        <br>
-        <button class="btn-dashboard" id="openDashboardBtn">📊 Open Live Dashboard</button>
-        <br>
-        <button class="clear-storage-btn" id="clearStorageBtn">Clear all data</button>
+        <div class="toolbar-row">
+          <button class="toolbar-btn dashboard" id="openDashboardBtn">📊 Dashboard</button>
+          <button class="toolbar-btn clear" id="clearStorageBtn">🗑️ Clear Data</button>
+        </div>
       </div>
 
       <div class="log-section" id="logSection"></div>

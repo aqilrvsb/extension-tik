@@ -36,76 +36,217 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Collect order IDs from the shipped orders list page
+ * Uses page-based navigation (TikTok shows 20 orders per page with page numbers 1,2,3...)
  */
 async function collectOrderIds(maxOrders = 100) {
   console.log('[Content] Collecting order IDs, max:', maxOrders);
 
-  const orderIds = [];
-
-  // Wait for page to load
-  await sleep(2000);
-
-  // Method 1: Find order links/rows in the table
-  // TikTok order IDs are typically 18-digit numbers
+  const orderIds = new Set();
   const orderPattern = /\d{17,19}/g;
 
-  // Look for order IDs in the page
-  // They appear in order links, order number displays, etc.
-  const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
+  // Wait for initial page load
+  await sleep(2000);
 
+  // Calculate how many pages needed (20 orders per page)
+  const pagesNeeded = Math.ceil(maxOrders / 20);
+  console.log('[Content] Will navigate through', pagesNeeded, 'pages to collect orders');
+
+  // Collect from current page first
+  collectOrdersFromPage(orderIds, orderPattern, maxOrders);
+  console.log('[Content] Page 1 - Collected', orderIds.size, 'orders so far');
+
+  // Navigate through pages
+  for (let page = 2; page <= pagesNeeded && orderIds.size < maxOrders; page++) {
+    console.log('[Content] Navigating to page', page);
+
+    // Try to click the next page number
+    const clicked = await clickPageNumber(page);
+
+    if (!clicked) {
+      console.log('[Content] Could not find page', page, '- trying next button');
+      const nextClicked = await clickNextPageButton();
+      if (!nextClicked) {
+        console.log('[Content] No more pages available, stopping at', orderIds.size, 'orders');
+        break;
+      }
+    }
+
+    // Wait for page to load
+    await sleep(2000);
+
+    // Collect orders from new page
+    const beforeCount = orderIds.size;
+    collectOrdersFromPage(orderIds, orderPattern, maxOrders);
+    console.log('[Content] Page', page, '- Collected', orderIds.size - beforeCount, 'new orders,', orderIds.size, 'total');
+
+    // If no new orders found, we might have reached the end
+    if (orderIds.size === beforeCount) {
+      console.log('[Content] No new orders on page', page, '- may have reached end');
+      // Try one more page before giving up
+      await sleep(1000);
+      collectOrdersFromPage(orderIds, orderPattern, maxOrders);
+      if (orderIds.size === beforeCount) {
+        break;
+      }
+    }
+  }
+
+  const result = Array.from(orderIds).slice(0, maxOrders);
+  console.log('[Content] Collected', result.length, 'order IDs total');
+  return result;
+}
+
+/**
+ * Click a specific page number in pagination
+ */
+async function clickPageNumber(pageNum) {
+  // Look for pagination buttons with the page number
+  const pageButtons = document.querySelectorAll(
+    'button[class*="pagination"], ' +
+    'li[class*="pagination"] button, ' +
+    'div[class*="pagination"] button, ' +
+    'span[class*="pagination"], ' +
+    'a[class*="page"], ' +
+    '.arco-pagination-item, ' +
+    '[class*="pager"] button, ' +
+    '[class*="pager"] li'
+  );
+
+  for (const btn of pageButtons) {
+    const text = btn.textContent?.trim();
+    if (text === String(pageNum)) {
+      console.log('[Content] Found page button:', pageNum);
+      btn.click();
+      return true;
+    }
+  }
+
+  // Try finding by aria-label or data attributes
+  const ariaButtons = document.querySelectorAll(`[aria-label*="${pageNum}"], [data-page="${pageNum}"]`);
+  for (const btn of ariaButtons) {
+    console.log('[Content] Found page button via aria/data:', pageNum);
+    btn.click();
+    return true;
+  }
+
+  // Try finding plain number buttons/links
+  const allButtons = document.querySelectorAll('button, a, li');
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim();
+    if (text === String(pageNum) && btn.offsetParent !== null) {
+      // Check if it's likely a pagination button (has siblings with other numbers)
+      const parent = btn.parentElement;
+      if (parent) {
+        const siblings = parent.querySelectorAll('button, a, li');
+        let hasNumbers = 0;
+        for (const sib of siblings) {
+          if (/^\d+$/.test(sib.textContent?.trim())) hasNumbers++;
+        }
+        if (hasNumbers >= 2) {
+          console.log('[Content] Found page number in pagination area:', pageNum);
+          btn.click();
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Click the "Next" button in pagination
+ */
+async function clickNextPageButton() {
+  // Common selectors for next page button
+  const nextSelectors = [
+    'button[aria-label*="next" i]',
+    'button[aria-label*="Next" i]',
+    'a[aria-label*="next" i]',
+    '.arco-pagination-item-next',
+    '[class*="pagination"] [class*="next"]',
+    'button:has(svg[class*="right"])',
+    'button:has(svg[class*="arrow"])'
+  ];
+
+  for (const selector of nextSelectors) {
+    try {
+      const btn = document.querySelector(selector);
+      if (btn && !btn.disabled && btn.offsetParent !== null) {
+        console.log('[Content] Found next button via:', selector);
+        btn.click();
+        return true;
+      }
+    } catch (e) {
+      // Selector might not be valid, continue
+    }
+  }
+
+  // Look for button with ">" or "»" or arrow icon
+  const allButtons = document.querySelectorAll('button, a');
+  for (const btn of allButtons) {
+    const text = btn.textContent?.trim();
+    if ((text === '>' || text === '»' || text === '→' || text === 'Next') &&
+        !btn.disabled && btn.offsetParent !== null) {
+      console.log('[Content] Found next button by text:', text);
+      btn.click();
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Collect orders from current page view
+ */
+function collectOrdersFromPage(orderIds, orderPattern, maxOrders) {
+  // Method 1: Find order links
+  const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
   for (const link of orderLinks) {
+    if (orderIds.size >= maxOrders) break;
     const href = link.href || '';
     const matches = href.match(orderPattern);
     if (matches) {
       for (const match of matches) {
-        if (!orderIds.includes(match) && match.length >= 17) {
-          orderIds.push(match);
-          if (orderIds.length >= maxOrders) break;
+        if (match.length >= 17 && match.length <= 19) {
+          orderIds.add(match);
         }
       }
     }
-    if (orderIds.length >= maxOrders) break;
   }
 
   // Method 2: Look for order IDs in table cells
-  if (orderIds.length < maxOrders) {
-    const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
-    for (const cell of cells) {
-      const text = cell.textContent || '';
-      const matches = text.match(orderPattern);
-      if (matches) {
-        for (const match of matches) {
-          if (!orderIds.includes(match) && match.length >= 17 && match.length <= 19) {
-            orderIds.push(match);
-            if (orderIds.length >= maxOrders) break;
-          }
+  const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
+  for (const cell of cells) {
+    if (orderIds.size >= maxOrders) break;
+    const text = cell.textContent || '';
+    const matches = text.match(orderPattern);
+    if (matches) {
+      for (const match of matches) {
+        if (match.length >= 17 && match.length <= 19) {
+          orderIds.add(match);
         }
       }
-      if (orderIds.length >= maxOrders) break;
     }
   }
 
-  // Method 3: Look in checkbox values or data attributes
-  if (orderIds.length < maxOrders) {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-    for (const checkbox of checkboxes) {
-      const value = checkbox.value || checkbox.dataset.orderId || '';
-      const matches = value.match(orderPattern);
-      if (matches) {
-        for (const match of matches) {
-          if (!orderIds.includes(match) && match.length >= 17) {
-            orderIds.push(match);
-            if (orderIds.length >= maxOrders) break;
-          }
+  // Method 3: Look in checkbox values
+  const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+  for (const checkbox of checkboxes) {
+    if (orderIds.size >= maxOrders) break;
+    const value = checkbox.value || checkbox.dataset.orderId || '';
+    const matches = value.match(orderPattern);
+    if (matches) {
+      for (const match of matches) {
+        if (match.length >= 17 && match.length <= 19) {
+          orderIds.add(match);
         }
       }
-      if (orderIds.length >= maxOrders) break;
     }
   }
-
-  console.log('[Content] Collected', orderIds.length, 'order IDs');
-  return orderIds;
 }
+
 
 /**
  * Extract order data from detail page
