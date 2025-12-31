@@ -201,8 +201,12 @@ async function clickNextPageButton() {
  * Collect orders from current page view
  */
 function collectOrdersFromPage(orderIds, orderPattern, maxOrders) {
+  console.log('[Content] Scanning page for order IDs...');
+  const beforeCount = orderIds.size;
+
   // Method 1: Find order links
   const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
+  console.log('[Content] Found', orderLinks.length, 'order links');
   for (const link of orderLinks) {
     if (orderIds.size >= maxOrders) break;
     const href = link.href || '';
@@ -216,17 +220,17 @@ function collectOrdersFromPage(orderIds, orderPattern, maxOrders) {
     }
   }
 
-  // Method 2: Look for order IDs in table cells
-  const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
+  // Method 2: Look for order IDs in table cells and divs
+  const cells = document.querySelectorAll('td, div, span');
   for (const cell of cells) {
     if (orderIds.size >= maxOrders) break;
+    // Only check direct text content (not nested)
     const text = cell.textContent || '';
-    const matches = text.match(orderPattern);
+    // Look for 18-digit numbers that look like order IDs
+    const matches = text.match(/\b\d{18}\b/g);
     if (matches) {
       for (const match of matches) {
-        if (match.length >= 17 && match.length <= 19) {
-          orderIds.add(match);
-        }
+        orderIds.add(match);
       }
     }
   }
@@ -245,6 +249,22 @@ function collectOrdersFromPage(orderIds, orderPattern, maxOrders) {
       }
     }
   }
+
+  // Method 4: Search entire page HTML for 18-digit order IDs
+  if (orderIds.size === beforeCount) {
+    console.log('[Content] No orders found with specific selectors, scanning full page...');
+    const pageText = document.body.innerText;
+    const allMatches = pageText.match(/\b5\d{17}\b/g); // TikTok order IDs start with 5
+    if (allMatches) {
+      console.log('[Content] Found', allMatches.length, 'potential order IDs in page text');
+      for (const match of allMatches) {
+        if (orderIds.size >= maxOrders) break;
+        orderIds.add(match);
+      }
+    }
+  }
+
+  console.log('[Content] Found', orderIds.size - beforeCount, 'new orders on this page');
 }
 
 
