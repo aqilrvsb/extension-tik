@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.0.0 - With resume, random delay, persistent state
+ * v2.1.0 - With pagination, auto-resume with fresh tab, random delay
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -188,19 +188,31 @@ async function handleResume(message) {
   log(`Resuming export from order ${state.currentOrderIndex + 1}/${state.orderIds.length}`);
 
   try {
-    // Open a new tab and start processing
+    // Close any existing TikTok Seller Center tabs (they may be stale/expired)
+    const existingTabs = await chrome.tabs.query({ url: '*://seller-my.tiktok.com/*' });
+    for (const tab of existingTabs) {
+      try {
+        await chrome.tabs.remove(tab.id);
+        log('Closed stale TikTok tab');
+      } catch (e) {
+        // Tab may already be closed
+      }
+    }
+
+    // Open a fresh new tab
     const tab = await chrome.tabs.create({
       url: 'https://seller-my.tiktok.com/order?tab=shipped',
       active: true
     });
     state.currentTabId = tab.id;
+    log('Opened fresh TikTok tab');
 
-    // Wait for tab to load then start processing
+    // Wait for tab to fully load then start processing
     setTimeout(() => {
       if (state.isRunning && !state.shouldStop) {
         processNextOrder();
       }
-    }, 3000);
+    }, 4000);
 
     return { success: true };
   } catch (error) {
@@ -616,4 +628,4 @@ function sleep(ms) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.0.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.1.0');

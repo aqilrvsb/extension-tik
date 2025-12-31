@@ -36,75 +36,201 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Collect order IDs from the shipped orders list page
+ * With pagination - clicks through pages to get more orders
  */
 async function collectOrderIds(maxOrders = 100) {
   console.log('[Content] Collecting order IDs, max:', maxOrders);
 
   const orderIds = [];
-
-  // Wait for page to load
-  await sleep(2000);
-
-  // Method 1: Find order links/rows in the table
-  // TikTok order IDs are typically 18-digit numbers
   const orderPattern = /\d{17,19}/g;
 
-  // Look for order IDs in the page
-  // They appear in order links, order number displays, etc.
-  const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
+  // Wait for page to fully load
+  await sleep(3000);
 
+  // Scroll down to ensure pagination is visible and loaded
+  window.scrollTo(0, document.body.scrollHeight);
+  await sleep(1000);
+  window.scrollTo(0, 0);
+  await sleep(500);
+
+  // Calculate pages needed (20 orders per page)
+  const pagesNeeded = Math.ceil(maxOrders / 20);
+  console.log('[Content] Need', pagesNeeded, 'pages for', maxOrders, 'orders');
+
+  // Log pagination info for debugging
+  const paginationContainer = document.querySelector('.arco-pagination, [class*="pagination"], [class*="Pagination"]');
+  if (paginationContainer) {
+    console.log('[Content] Found pagination container:', paginationContainer.className);
+    console.log('[Content] Pagination HTML:', paginationContainer.innerHTML.substring(0, 500));
+  } else {
+    console.log('[Content] No pagination container found');
+  }
+
+  // Collect from current page (page 1)
+  collectFromCurrentPage(orderIds, orderPattern, maxOrders);
+  console.log('[Content] Page 1:', orderIds.length, 'orders');
+
+  // Navigate to more pages if needed
+  for (let page = 2; page <= pagesNeeded && orderIds.length < maxOrders; page++) {
+    // Click page number
+    const clicked = clickPaginationNumber(page);
+    if (!clicked) {
+      console.log('[Content] Cannot find page', page, '- stopping pagination');
+      break;
+    }
+
+    // Wait for page content to update
+    await sleep(3000);
+
+    // Scroll to ensure new content is visible
+    window.scrollTo(0, 0);
+    await sleep(500);
+
+    // Collect from this page
+    const before = orderIds.length;
+    collectFromCurrentPage(orderIds, orderPattern, maxOrders);
+    const newCount = orderIds.length - before;
+    console.log('[Content] Page', page, ':', newCount, 'new,', orderIds.length, 'total');
+
+    if (newCount === 0) {
+      console.log('[Content] No new orders on page', page, '- stopping');
+      break;
+    }
+  }
+
+  console.log('[Content] Total collected:', orderIds.length, 'order IDs');
+  return orderIds;
+}
+
+/**
+ * Collect orders from current page view
+ */
+function collectFromCurrentPage(orderIds, orderPattern, maxOrders) {
+  // Method 1: Find order links
+  const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
   for (const link of orderLinks) {
+    if (orderIds.length >= maxOrders) return;
     const href = link.href || '';
     const matches = href.match(orderPattern);
     if (matches) {
       for (const match of matches) {
         if (!orderIds.includes(match) && match.length >= 17) {
           orderIds.push(match);
-          if (orderIds.length >= maxOrders) break;
         }
       }
     }
-    if (orderIds.length >= maxOrders) break;
   }
 
-  // Method 2: Look for order IDs in table cells
-  if (orderIds.length < maxOrders) {
-    const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
-    for (const cell of cells) {
-      const text = cell.textContent || '';
-      const matches = text.match(orderPattern);
-      if (matches) {
-        for (const match of matches) {
-          if (!orderIds.includes(match) && match.length >= 17 && match.length <= 19) {
-            orderIds.push(match);
-            if (orderIds.length >= maxOrders) break;
-          }
+  // Method 2: Look in table cells
+  const cells = document.querySelectorAll('td, div[class*="order"], span[class*="order"]');
+  for (const cell of cells) {
+    if (orderIds.length >= maxOrders) return;
+    const text = cell.textContent || '';
+    const matches = text.match(orderPattern);
+    if (matches) {
+      for (const match of matches) {
+        if (!orderIds.includes(match) && match.length >= 17 && match.length <= 19) {
+          orderIds.push(match);
         }
       }
-      if (orderIds.length >= maxOrders) break;
     }
   }
 
-  // Method 3: Look in checkbox values or data attributes
-  if (orderIds.length < maxOrders) {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"]');
-    for (const checkbox of checkboxes) {
-      const value = checkbox.value || checkbox.dataset.orderId || '';
-      const matches = value.match(orderPattern);
-      if (matches) {
-        for (const match of matches) {
-          if (!orderIds.includes(match) && match.length >= 17) {
-            orderIds.push(match);
-            if (orderIds.length >= maxOrders) break;
-          }
+  // Method 3: Look in checkboxes
+  const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+  for (const checkbox of checkboxes) {
+    if (orderIds.length >= maxOrders) return;
+    const value = checkbox.value || checkbox.dataset.orderId || '';
+    const matches = value.match(orderPattern);
+    if (matches) {
+      for (const match of matches) {
+        if (!orderIds.includes(match) && match.length >= 17) {
+          orderIds.push(match);
         }
       }
-      if (orderIds.length >= maxOrders) break;
+    }
+  }
+}
+
+/**
+ * Click pagination number button
+ */
+function clickPaginationNumber(pageNum) {
+  console.log('[Content] Looking for page', pageNum);
+
+  // Method 1: Arco Design pagination (most common in TikTok Seller Center)
+  const arcoItems = document.querySelectorAll('.arco-pagination-item');
+  for (const item of arcoItems) {
+    const text = item.textContent?.trim();
+    if (text === String(pageNum)) {
+      console.log('[Content] Found Arco pagination item for page', pageNum);
+      simulateClick(item);
+      return true;
     }
   }
 
-  console.log('[Content] Collected', orderIds.length, 'order IDs');
-  return orderIds;
+  // Method 2: Look for pagination items with number
+  const paginationSelectors = [
+    '.arco-pagination li',
+    '[class*="Pagination"] li',
+    '[class*="pagination"] li',
+    '[class*="pager"] li',
+    '.ant-pagination-item',
+    '[data-page]'
+  ];
+
+  for (const selector of paginationSelectors) {
+    const items = document.querySelectorAll(selector);
+    for (const item of items) {
+      const text = item.textContent?.trim();
+      const dataPage = item.getAttribute('data-page');
+      if (text === String(pageNum) || dataPage === String(pageNum)) {
+        console.log('[Content] Found pagination item:', selector, 'page', pageNum);
+        simulateClick(item);
+        return true;
+      }
+    }
+  }
+
+  // Method 3: Look for clickable elements with exact page number text
+  const clickableSelectors = ['button', 'a', 'span', 'div', 'li'];
+  for (const tag of clickableSelectors) {
+    const elements = document.querySelectorAll(tag);
+    for (const el of elements) {
+      // Must be visible and have exact page number
+      if (el.offsetParent && el.textContent?.trim() === String(pageNum)) {
+        // Check if it's in a pagination context
+        const parent = el.closest('[class*="pagination"], [class*="Pagination"], [class*="pager"], .arco-pagination');
+        if (parent) {
+          console.log('[Content] Found page element in pagination container:', tag, pageNum);
+          simulateClick(el);
+          return true;
+        }
+      }
+    }
+  }
+
+  // Method 4: Try clicking "Next" button if we can't find specific page
+  if (pageNum > 1) {
+    const nextSelectors = [
+      '.arco-pagination-item-next',
+      '[class*="pagination"] [class*="next"]',
+      'button[aria-label="next"]',
+      '[class*="next-page"]'
+    ];
+
+    for (const selector of nextSelectors) {
+      const nextBtn = document.querySelector(selector);
+      if (nextBtn && !nextBtn.disabled && nextBtn.offsetParent) {
+        console.log('[Content] Clicking Next button instead');
+        simulateClick(nextBtn);
+        return true;
+      }
+    }
+  }
+
+  console.log('[Content] Could not find pagination element for page', pageNum);
+  return false;
 }
 
 /**
