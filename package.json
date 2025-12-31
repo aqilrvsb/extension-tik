@@ -1,0 +1,24 @@
+{
+  "name": "extension-tik",
+  "version": "1.0.0",
+  "description": "A standalone Chrome extension to export TikTok Shop shipped orders with customer details to Excel/CSV.",
+  "main": "background.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aqilrvsb/extension-tik.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/aqilrvsb/extension-tik/issues"
+  },
+  "homepage": "https://github.com/aqilrvsb/extension-tik#readme",
+  "devDependencies": {
+    "canvas": "^3.2.0"
+  }
+}
