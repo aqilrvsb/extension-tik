@@ -1,6 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.5.0 - Excel XLSX export support
+ * v2.6.0 - Desktop notifications & sound effects
  */
 
 // Supabase config for license validation
@@ -456,6 +456,46 @@ delayMaxInput.addEventListener('change', () => {
   chrome.storage.local.set({ delayMin: min, delayMax: max });
 });
 
+// Sound effects using Web Audio API
+function playSound(type) {
+  if (type === 'success') {
+    // Pleasant success chime (C5 -> E5 -> G5)
+    playChime([523, 659, 784], 150);
+  } else {
+    // Warning tone (lower pitched)
+    playChime([392, 330], 200);
+  }
+}
+
+// Play a chime with multiple notes
+function playChime(frequencies, noteLength = 150) {
+  try {
+    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+    frequencies.forEach((freq, index) => {
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
+      oscillator.frequency.value = freq;
+      oscillator.type = 'sine';
+      gainNode.gain.value = 0.2;
+
+      const startTime = audioContext.currentTime + (index * noteLength / 1000);
+      const endTime = startTime + (noteLength / 1000);
+
+      oscillator.start(startTime);
+      gainNode.gain.setValueAtTime(0.2, startTime);
+      gainNode.gain.exponentialRampToValueAtTime(0.01, endTime);
+      oscillator.stop(endTime + 0.1);
+    });
+  } catch (err) {
+    console.log('[Popup] Could not play sound:', err);
+  }
+}
+
 // Listen for status updates from background
 chrome.runtime.onMessage.addListener((message) => {
   console.log('[Popup] Message:', message);
@@ -464,6 +504,8 @@ chrome.runtime.onMessage.addListener((message) => {
     updateUI(message);
   } else if (message.type === 'LOG') {
     addLog(message.text, message.level);
+  } else if (message.type === 'PLAY_SOUND') {
+    playSound(message.sound);
   }
 });
 

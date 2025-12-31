@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.5.0 - Excel XLSX export support
+ * v2.6.0 - Desktop notifications & sound effects
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -17,6 +17,7 @@ importScripts('lib/xlsx.full.min.js');
 
 // Constants
 const MAX_RETRIES = 3;
+const NOTIFICATION_ID = 'tiktok-export-complete';
 
 // State
 let state = {
@@ -376,6 +377,9 @@ async function processNextOrder() {
     const retriedMsg = state.retried > 0 ? `, ${state.retried} recovered by retry` : '';
     log(`Export completed! ${state.success} success, ${state.failed} failed, ${state.skipped} skipped${retriedMsg}`);
     broadcastStatus('Export completed!', false, false, true);
+
+    // Show desktop notification
+    showCompletionNotification(state.success, state.failed, state.skipped, state.retried);
 
     // Save collected data and clear session
     await saveToStorage();
@@ -817,5 +821,28 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Show desktop notification when export completes
+ */
+function showCompletionNotification(success, failed, skipped, retried = 0) {
+  const total = success + failed + skipped;
+  const retriedText = retried > 0 ? `, ${retried} recovered` : '';
+
+  chrome.notifications.create(NOTIFICATION_ID, {
+    type: 'basic',
+    iconUrl: 'icons/icon128.png',
+    title: 'Export Complete!',
+    message: `${success} orders exported successfully!\n${failed} failed, ${skipped} skipped${retriedText}`,
+    priority: 2,
+    requireInteraction: false
+  });
+
+  // Send message to popup to play sound
+  chrome.runtime.sendMessage({
+    type: 'PLAY_SOUND',
+    sound: failed === 0 ? 'success' : 'warning'
+  }).catch(() => {});
+}
+
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.5.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.6.0');
