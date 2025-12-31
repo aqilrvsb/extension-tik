@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      width: 380px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 400px;
+    }
+
+    .container {
+      padding: 20px;
+    }
+
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      font-size: 20px;
+      margin-bottom: 5px;
+    }
+
+    .header p {
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .status-section {
+      text-align: center;
+      padding: 15px;
+      background: #f8f9fa;
+      border-radius: 8px;
+      margin-bottom: 15px;
+    }
+
+    .status-icon {
+      font-size: 40px;
+      margin-bottom: 10px;
+    }
+
+    .status-text {
+      font-size: 14px;
+      color: #666;
+    }
+
+    .status-text.running {
+      color: #667eea;
+      font-weight: 600;
+    }
+
+    .progress-section {
+      margin: 15px 0;
+      display: none;
+    }
+
+    .progress-section.show {
+      display: block;
+    }
+
+    .progress-bar {
+      height: 8px;
+      background: #e9ecef;
+      border-radius: 4px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #667eea, #764ba2);
+      border-radius: 4px;
+      transition: width 0.3s ease;
+      width: 0%;
+    }
+
+    .progress-stats {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #666;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 15px 0;
+    }
+
+    .stat-box {
+      text-align: center;
+      padding: 12px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: #333;
+    }
+
+    .stat-value.success {
+      color: #28a745;
+    }
+
+    .stat-value.failed {
+      color: #dc3545;
+    }
+
+    .stat-label {
+      font-size: 11px;
+      color: #666;
+      text-transform: uppercase;
+    }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c82333;
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #218838;
+    }
+
+    .btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .btn-group .btn {
+      flex: 1;
+    }
+
+    .current-order {
+      background: #e8f4fd;
+      padding: 10px;
+      border-radius: 6px;
+      margin: 10px 0;
+      font-size: 12px;
+      color: #0066cc;
+      display: none;
+    }
+
+    .current-order.show {
+      display: block;
+    }
+
+    .log-section {
+      max-height: 120px;
+      overflow-y: auto;
+      margin-top: 15px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 6px;
+      font-size: 11px;
+      font-family: monospace;
+      display: none;
+    }
+
+    .log-section.show {
+      display: block;
+    }
+
+    .log-entry {
+      padding: 3px 0;
+      border-bottom: 1px solid #eee;
+    }
+
+    .log-entry:last-child {
+      border-bottom: none;
+    }
+
+    .log-entry.success {
+      color: #28a745;
+    }
+
+    .log-entry.error {
+      color: #dc3545;
+    }
+
+    .settings-section {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid #eee;
+    }
+
+    .setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+
+    .setting-label {
+      font-size: 13px;
+      color: #333;
+    }
+
+    .setting-input {
+      width: 80px;
+      padding: 6px 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 13px;
+      text-align: center;
+    }
+
+    .footer {
+      text-align: center;
+      margin-top: 15px;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.7);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>TikTok Order Exporter</h1>
+      <p>Export shipped orders to Excel</p>
+    </div>
+
+    <div class="card">
+      <div class="status-section">
+        <div class="status-icon" id="statusIcon">📦</div>
+        <div class="status-text" id="statusText">Ready to export orders</div>
+      </div>
+
+      <div class="progress-section" id="progressSection">
+        <div class="progress-bar">
+          <div class="progress-fill" id="progressFill"></div>
+        </div>
+        <div class="progress-stats">
+          <span id="progressText">0 / 0 orders</span>
+          <span id="progressPercent">0%</span>
+        </div>
+      </div>
+
+      <div class="current-order" id="currentOrder">
+        Processing: <span id="currentOrderId">-</span>
+      </div>
+
+      <div class="stats-grid" id="statsGrid" style="display: none;">
+        <div class="stat-box">
+          <div class="stat-value" id="totalCollected">0</div>
+          <div class="stat-label">Collected</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value success" id="successCount">0</div>
+          <div class="stat-label">Success</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value failed" id="failedCount">0</div>
+          <div class="stat-label">Failed</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-value" id="totalAmount">RM 0</div>
+          <div class="stat-label">Total Value</div>
+        </div>
+      </div>
+
+      <button class="btn btn-primary" id="startBtn">
+        <span>🚀</span> Start Export
+      </button>
+
+      <div class="btn-group" id="actionBtns" style="display: none;">
+        <button class="btn btn-danger" id="stopBtn">
+          <span>⏹</span> Stop
+        </button>
+        <button class="btn btn-success" id="downloadBtn" disabled>
+          <span>📥</span> Download Excel
+        </button>
+      </div>
+
+      <div class="settings-section">
+        <div class="setting-row">
+          <span class="setting-label">Max orders to process:</span>
+          <input type="number" class="setting-input" id="maxOrders" value="100" min="1" max="1000">
+        </div>
+        <div class="setting-row">
+          <span class="setting-label">Delay between orders (ms):</span>
+          <input type="number" class="setting-input" id="delayMs" value="2000" min="1000" max="10000">
+        </div>
+      </div>
+
+      <div class="log-section" id="logSection"></div>
+    </div>
+
+    <div class="footer">
+      v1.0.0 - Standalone Export Tool
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
