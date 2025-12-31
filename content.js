@@ -47,9 +47,19 @@ async function collectOrderIds(maxOrders = 100) {
   // Wait for page to load
   await sleep(2000);
 
+  // Scroll to bottom to ensure pagination is loaded
+  window.scrollTo(0, document.body.scrollHeight);
+  await sleep(1000);
+  window.scrollTo(0, 0);
+  await sleep(500);
+
   // Calculate pages needed (20 orders per page)
   const pagesNeeded = Math.ceil(maxOrders / 20);
   console.log('[Content] Need', pagesNeeded, 'pages for', maxOrders, 'orders');
+
+  // Debug: Check pagination exists
+  const paginationItems = document.querySelectorAll('.core-pagination-item');
+  console.log('[Content] Found', paginationItems.length, 'pagination items');
 
   // Collect from page 1
   collectOrdersFromPage(orderIds, orderPattern, maxOrders);
@@ -57,6 +67,10 @@ async function collectOrderIds(maxOrders = 100) {
 
   // Go through more pages if needed
   for (let page = 2; page <= pagesNeeded && orderIds.length < maxOrders; page++) {
+    // Scroll to pagination
+    window.scrollTo(0, document.body.scrollHeight);
+    await sleep(500);
+
     // Click the page number
     const clicked = clickPage(page);
     if (!clicked) {
@@ -64,8 +78,12 @@ async function collectOrderIds(maxOrders = 100) {
       break;
     }
 
-    // Wait for page to load
-    await sleep(2500);
+    // Wait for page to load new content
+    await sleep(3000);
+
+    // Scroll back up to see orders
+    window.scrollTo(0, 0);
+    await sleep(500);
 
     // Collect orders from this page
     const before = orderIds.length;
