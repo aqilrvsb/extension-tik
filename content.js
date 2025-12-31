@@ -36,25 +36,61 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 /**
  * Collect order IDs from the shipped orders list page
- * Simple version - collects from visible page only (up to 20 orders)
+ * With pagination - 20 orders per page, clicks through pages
  */
 async function collectOrderIds(maxOrders = 100) {
   console.log('[Content] Collecting order IDs, max:', maxOrders);
 
   const orderIds = [];
+  const orderPattern = /5\d{16,18}/g;
 
   // Wait for page to load
   await sleep(2000);
 
-  // Order IDs are 17-19 digit numbers starting with 5
-  const orderPattern = /5\d{16,18}/g;
+  // Calculate pages needed (20 orders per page)
+  const pagesNeeded = Math.ceil(maxOrders / 20);
+  console.log('[Content] Need', pagesNeeded, 'pages for', maxOrders, 'orders');
 
-  // Method 1: Find order links (most reliable)
+  // Collect from page 1
+  collectOrdersFromPage(orderIds, orderPattern, maxOrders);
+  console.log('[Content] Page 1:', orderIds.length, 'orders');
+
+  // Go through more pages if needed
+  for (let page = 2; page <= pagesNeeded && orderIds.length < maxOrders; page++) {
+    // Click the page number
+    const clicked = clickPage(page);
+    if (!clicked) {
+      console.log('[Content] Could not click page', page);
+      break;
+    }
+
+    // Wait for page to load
+    await sleep(2500);
+
+    // Collect orders from this page
+    const before = orderIds.length;
+    collectOrdersFromPage(orderIds, orderPattern, maxOrders);
+    console.log('[Content] Page', page, ':', orderIds.length - before, 'new orders, total:', orderIds.length);
+
+    // Stop if no new orders found
+    if (orderIds.length === before) {
+      console.log('[Content] No new orders on page', page);
+      break;
+    }
+  }
+
+  console.log('[Content] Total collected:', orderIds.length, 'order IDs');
+  return orderIds;
+}
+
+/**
+ * Collect orders from current page view
+ */
+function collectOrdersFromPage(orderIds, orderPattern, maxOrders) {
+  // Find order links
   const orderLinks = document.querySelectorAll('a[href*="order/detail"], a[href*="order_no="]');
-  console.log('[Content] Found', orderLinks.length, 'order links');
-
   for (const link of orderLinks) {
-    if (orderIds.length >= maxOrders) break;
+    if (orderIds.length >= maxOrders) return;
     const href = link.href || '';
     const matches = href.match(orderPattern);
     if (matches) {
@@ -65,45 +101,33 @@ async function collectOrderIds(maxOrders = 100) {
       }
     }
   }
+}
 
-  // Method 2: Look in table rows
-  if (orderIds.length === 0) {
-    console.log('[Content] No links found, trying table cells...');
-    const rows = document.querySelectorAll('tr, [class*="TableRow"], [class*="table-row"]');
-    for (const row of rows) {
-      if (orderIds.length >= maxOrders) break;
-      const text = row.textContent || '';
-      const matches = text.match(orderPattern);
-      if (matches) {
-        for (const match of matches) {
-          if (!orderIds.includes(match)) {
-            orderIds.push(match);
-          }
-        }
-      }
+/**
+ * Click a specific page number in pagination
+ */
+function clickPage(pageNum) {
+  // Find pagination items with class "core-pagination-item"
+  const paginationItems = document.querySelectorAll('.core-pagination-item');
+
+  for (const item of paginationItems) {
+    const text = item.textContent?.trim();
+    if (text === String(pageNum)) {
+      console.log('[Content] Clicking page', pageNum);
+      item.click();
+      return true;
     }
   }
 
-  // Method 3: Scan entire page text
-  if (orderIds.length === 0) {
-    console.log('[Content] No table rows found, scanning page...');
-    const pageText = document.body.innerText;
-    const matches = pageText.match(orderPattern);
-    if (matches) {
-      for (const match of matches) {
-        if (!orderIds.includes(match) && orderIds.length < maxOrders) {
-          orderIds.push(match);
-        }
-      }
-    }
+  // Fallback: try aria-label
+  const pageByLabel = document.querySelector(`[aria-label="Page ${pageNum}"]`);
+  if (pageByLabel) {
+    console.log('[Content] Clicking page', pageNum, 'via aria-label');
+    pageByLabel.click();
+    return true;
   }
 
-  console.log('[Content] Total collected:', orderIds.length, 'order IDs');
-  if (orderIds.length > 0) {
-    console.log('[Content] Sample IDs:', orderIds.slice(0, 3));
-  }
-
-  return orderIds;
+  return false;
 }
 
 
