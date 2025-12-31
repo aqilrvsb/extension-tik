@@ -3,6 +3,11 @@
  * v2.6.0 - Desktop notifications & sound effects
  */
 
+const DEBUG = false; // Set to true for verbose logging
+function debugLog(...args) {
+  if (DEBUG) debugLog('', ...args);
+}
+
 // Supabase config for license validation
 const SUPABASE_URL = 'https://rfvocvjwlxpiaxbciqnn.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdm9jdmp3bHhwaWF4YmNpcW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODY5ODgsImV4cCI6MjA4MTg2Mjk4OH0.dn5sIWgnBO_Ey3X0iL-4cKhXjQvZr4pjTo3iI0bMYkQ';
@@ -253,17 +258,17 @@ async function checkLicenseBeforeStart() {
 
     // If we can't get shop code, allow with warning
     if (!currentShopCode) {
-      console.log('[License] Could not detect shop code, using cached license');
+      debugLog('[License] Could not detect shop code, using cached license');
       return true;
     }
 
     // Verify shop code matches
     if (cachedLicense.shopCode === currentShopCode) {
-      console.log('[License] Using cached license for shop:', currentShopCode);
+      debugLog('[License] Using cached license for shop:', currentShopCode);
       return true;
     } else {
       // Shop code mismatch, need new license
-      console.log('[License] Shop code mismatch, need new license');
+      debugLog('[License] Shop code mismatch, need new license');
       showLicenseModal();
       return false;
     }
@@ -391,8 +396,8 @@ async function checkPreviousSession() {
     const success = session.success || 0;
     const failed = session.failed || 0;
 
-    console.log('[Popup] Found interrupted session, auto-resuming...');
-    console.log('[Popup] Progress:', session.currentOrderIndex, '/', session.orderIds.length);
+    debugLog(' Found interrupted session, auto-resuming...');
+    debugLog(' Progress:', session.currentOrderIndex, '/', session.orderIds.length);
 
     // Show brief notification then auto-resume
     statusIcon.textContent = '🔄';
@@ -423,7 +428,7 @@ function autoResume() {
       historySection.classList.remove('show');
     } else if (response && response.error) {
       // If auto-resume fails, show manual resume option
-      console.log('[Popup] Auto-resume failed:', response.error);
+      debugLog(' Auto-resume failed:', response.error);
       historySection.classList.add('show');
       startBtn.style.display = 'none';
       addLog('Auto-resume failed: ' + response.error, 'error');
@@ -492,13 +497,13 @@ function playChime(frequencies, noteLength = 150) {
       oscillator.stop(endTime + 0.1);
     });
   } catch (err) {
-    console.log('[Popup] Could not play sound:', err);
+    debugLog(' Could not play sound:', err);
   }
 }
 
 // Listen for status updates from background
 chrome.runtime.onMessage.addListener((message) => {
-  console.log('[Popup] Message:', message);
+  debugLog(' Message:', message);
 
   if (message.type === 'STATUS_UPDATE') {
     updateUI(message);

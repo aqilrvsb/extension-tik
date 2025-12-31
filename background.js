@@ -18,6 +18,12 @@ importScripts('lib/xlsx.full.min.js');
 // Constants
 const MAX_RETRIES = 3;
 const NOTIFICATION_ID = 'tiktok-export-complete';
+const DEBUG = false; // Set to true for verbose logging
+
+// Debug logger
+function debugLog(...args) {
+  if (DEBUG) console.log('[Background]', ...args);
+}
 
 // State
 let state = {
@@ -44,7 +50,7 @@ let state = {
 
 // Listen for messages from popup
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('[Background] Message:', message.type);
+  debugLog('Message:', message.type);
 
   switch (message.type) {
     case 'START_EXPORT':
@@ -90,7 +96,7 @@ let collectCalled = false;
 // Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (tabId === state.currentTabId && changeInfo.status === 'complete' && state.isRunning) {
-    console.log('[Background] Tab loaded:', tab.url);
+    debugLog('Tab loaded:', tab.url);
 
     setTimeout(() => {
       if (!state.isRunning || state.shouldStop) return;
@@ -101,7 +107,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
           collectCalled = true;
           collectOrderIds();
         } else {
-          console.log('[Background] collectOrderIds already called, skipping');
+          debugLog('collectOrderIds already called, skipping');
         }
       } else if (state.phase === 'processing' && tab.url.includes('/order/detail')) {
         if (!state.isProcessingOrder) {
@@ -285,7 +291,7 @@ async function saveSessionState() {
         savedAt: new Date().toISOString()
       }
     });
-    console.log('[Background] Session state saved');
+    debugLog('Session state saved');
   }
 }
 
@@ -294,7 +300,7 @@ async function saveSessionState() {
  */
 async function clearSessionState() {
   await chrome.storage.local.remove(['sessionState']);
-  console.log('[Background] Session state cleared');
+  debugLog('Session state cleared');
 }
 
 /**
@@ -413,7 +419,7 @@ async function processCurrentOrder() {
   if (state.currentOrderIndex >= state.orderIds.length) return;
 
   if (state.isProcessingOrder) {
-    console.log('[Background] Already processing, skipping');
+    debugLog('Already processing, skipping');
     return;
   }
   state.isProcessingOrder = true;
@@ -810,7 +816,7 @@ function broadcastStatus(message = null, running = null, stopped = false, comple
  * Send log to popup
  */
 function log(text, level = 'info') {
-  console.log(`[Background] ${text}`);
+  if (DEBUG) console.log(`[Background] ${text}`);
   chrome.runtime.sendMessage({ type: 'LOG', text, level }).catch(() => {});
 }
 
