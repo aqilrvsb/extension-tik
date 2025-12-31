@@ -12,10 +12,10 @@ const progressPercent = document.getElementById('progressPercent');
 const currentOrder = document.getElementById('currentOrder');
 const currentOrderId = document.getElementById('currentOrderId');
 const statsGrid = document.getElementById('statsGrid');
-const totalCollected = document.getElementById('totalCollected');
 const successCount = document.getElementById('successCount');
 const failedCount = document.getElementById('failedCount');
-const totalAmount = document.getElementById('totalAmount');
+const skippedCount = document.getElementById('skippedCount');
+const remainingCount = document.getElementById('remainingCount');
 const startBtn = document.getElementById('startBtn');
 const actionBtns = document.getElementById('actionBtns');
 const stopBtn = document.getElementById('stopBtn');
@@ -143,16 +143,16 @@ function updateUI(status) {
   }
 
   // Update stats
-  if (status.collected > 0 || status.success > 0 || status.failed > 0) {
+  if (status.success > 0 || status.failed > 0 || status.skipped > 0 || status.remaining > 0) {
     statsGrid.style.display = 'grid';
-    totalCollected.textContent = status.collected || 0;
     successCount.textContent = status.success || 0;
     failedCount.textContent = status.failed || 0;
-    totalAmount.textContent = formatCurrency(status.totalAmount || 0);
+    skippedCount.textContent = status.skipped || 0;
+    remainingCount.textContent = status.remaining || 0;
   }
 
   // Enable download if we have data
-  if (status.collected > 0 && !status.isRunning) {
+  if ((status.collected > 0 || status.success > 0) && !status.isRunning) {
     downloadBtn.disabled = false;
   }
 }

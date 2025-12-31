@@ -20,10 +20,12 @@ let state = {
   delayMs: 2000,
   orderIds: [],
   collectedData: [],
+  existingOrderIds: [],  // Orders already in storage (to skip)
   currentOrderIndex: 0,
   processed: 0,
   success: 0,
   failed: 0,
+  skipped: 0,
   totalAmount: 0,
   isProcessingOrder: false,
   phase: 'idle' // idle, collecting, processing, done
@@ -94,6 +96,10 @@ async function handleStart(message) {
     return { error: 'Already running' };
   }
 
+  // Load existing orders from storage
+  const storage = await chrome.storage.local.get(['exportedOrders']);
+  const existingOrderIds = storage.exportedOrders ? storage.exportedOrders.map(o => o.order_id) : [];
+
   // Reset state
   state = {
     isRunning: true,
@@ -103,17 +109,19 @@ async function handleStart(message) {
     delayMs: message.delayMs || 2000,
     orderIds: [],
     collectedData: [],
+    existingOrderIds: existingOrderIds,
     currentOrderIndex: 0,
     processed: 0,
     success: 0,
     failed: 0,
+    skipped: 0,
     totalAmount: 0,
     isProcessingOrder: false,
     phase: 'collecting'
   };
 
   broadcastStatus('Opening TikTok Seller Center...');
-  log('Starting export process...');
+  log(`Starting export... (${existingOrderIds.length} orders already in storage)`);
 
   try {
     // Open TikTok Seller Center shipped tab
@@ -194,19 +202,41 @@ function handleOrderIdsCollected(orderIds) {
 async function processNextOrder() {
   if (state.shouldStop || !state.isRunning) return;
 
+  // Skip orders that already exist in storage
+  while (state.currentOrderIndex < state.orderIds.length) {
+    const orderId = state.orderIds[state.currentOrderIndex];
+
+    if (state.existingOrderIds.includes(orderId)) {
+      // Skip this order - already exported
+      const orderIdShort = orderId.slice(-8);
+      log(`⏭ Skipping ...${orderIdShort} (already exported)`, 'info');
+      state.skipped++;
+      state.currentOrderIndex++;
+      broadcastStatus();
+      continue;
+    }
+
+    // Found an order to process
+    break;
+  }
+
   if (state.currentOrderIndex >= state.orderIds.length) {
     // All done!
     state.isRunning = false;
     state.phase = 'done';
-    log(`Export completed! ${state.success} success, ${state.failed} failed`);
+    log(`Export completed! ${state.success} success, ${state.failed} failed, ${state.skipped} skipped`);
     broadcastStatus('Export completed!', false, false, true);
+
+    // Save collected data to storage
+    await saveToStorage();
     return;
   }
 
   const orderId = state.orderIds[state.currentOrderIndex];
   const orderIdShort = orderId.slice(-8);
+  const remaining = state.orderIds.length - state.currentOrderIndex - state.skipped;
 
-  log(`Processing order ...${orderIdShort} (${state.currentOrderIndex + 1}/${state.orderIds.length})`);
+  log(`Processing order ...${orderIdShort} (${state.currentOrderIndex + 1}/${state.orderIds.length}, ${remaining} remaining)`);
   broadcastStatus(`Processing order ${state.currentOrderIndex + 1}/${state.orderIds.length}`, true, false, false, orderId);
 
   // Navigate to order detail page
@@ -264,13 +294,17 @@ function handleOrderDataExtracted(data) {
     state.success++;
     state.collectedData.push({
       order_id: orderId,
+      shipping_method: data.shipping_method || '',
+      payment_method: data.payment_method || '',
+      total_amount: data.total_amount || 0,
+      currency: data.currency || 'MYR',
+      items: data.items || '',
+      sku_id: data.sku_id || '',
       customer_name: data.name || '',
       phone_number: data.phone_number || '',
       full_address: data.full_address || '',
       order_status: data.status || '',
-      total_amount: data.total_amount || 0,
-      currency: data.currency || 'MYR',
-      order_date: data.order_date || '',
+      order_date: data.order_date || '',  // Time created
       extracted_at: new Date().toISOString()
     });
 
@@ -289,6 +323,31 @@ function handleOrderDataExtracted(data) {
 
   // Continue to next order after delay
   setTimeout(() => processNextOrder(), state.delayMs);
+}
+
+/**
+ * Save collected data to chrome.storage.local
+ */
+async function saveToStorage() {
+  if (state.collectedData.length === 0) return;
+
+  try {
+    // Get existing data
+    const storage = await chrome.storage.local.get(['exportedOrders']);
+    const existingOrders = storage.exportedOrders || [];
+
+    // Merge new data (avoid duplicates)
+    const existingIds = new Set(existingOrders.map(o => o.order_id));
+    const newOrders = state.collectedData.filter(o => !existingIds.has(o.order_id));
+
+    const allOrders = [...existingOrders, ...newOrders];
+
+    // Save to storage
+    await chrome.storage.local.set({ exportedOrders: allOrders });
+    log(`Saved ${newOrders.length} new orders to storage (total: ${allOrders.length})`);
+  } catch (error) {
+    log('Failed to save to storage: ' + error.message, 'error');
+  }
 }
 
 /**
@@ -312,34 +371,40 @@ function handleOrderFailed(orderId, reason) {
  * Download collected data as Excel/CSV
  */
 async function downloadExcel() {
-  if (state.collectedData.length === 0) {
+  // Get all data from storage
+  const storage = await chrome.storage.local.get(['exportedOrders']);
+  const allOrders = storage.exportedOrders || [];
+
+  if (allOrders.length === 0) {
     return { error: 'No data to download' };
   }
 
   try {
-    // Create CSV content
+    // Create CSV content with all columns
     const headers = [
       'Order ID',
+      'Shipping Method',
+      'Payment Method',
+      'Total',
+      'Item (Full)',
+      'SKU ID',
       'Customer Name',
-      'Phone Number',
-      'Full Address',
-      'Order Status',
-      'Total Amount',
-      'Currency',
-      'Order Date',
-      'Extracted At'
+      'Customer Phone',
+      'Customer Address',
+      'Date Order'
     ];
 
-    const rows = state.collectedData.map(row => [
+    const rows = allOrders.map(row => [
       row.order_id,
+      `"${(row.shipping_method || '').replace(/"/g, '""')}"`,
+      `"${(row.payment_method || '').replace(/"/g, '""')}"`,
+      `${row.currency || 'MYR'} ${row.total_amount || 0}`,
+      `"${(row.items || '').replace(/"/g, '""')}"`,
+      `"${(row.sku_id || '').replace(/"/g, '""')}"`,
       `"${(row.customer_name || '').replace(/"/g, '""')}"`,
-      row.phone_number,
+      row.phone_number || '',
       `"${(row.full_address || '').replace(/"/g, '""')}"`,
-      row.order_status,
-      row.total_amount,
-      row.currency,
-      row.order_date,
-      row.extracted_at
+      row.order_date || ''
     ]);
 
     const csvContent = [
@@ -353,7 +418,7 @@ async function downloadExcel() {
 
     // Create download URL
     const url = URL.createObjectURL(blob);
-    const filename = `tiktok_orders_${new Date().toISOString().split('T')[0]}_${state.collectedData.length}orders.csv`;
+    const filename = `tiktok_orders_${new Date().toISOString().split('T')[0]}_${allOrders.length}orders.csv`;
 
     // Download file
     await chrome.downloads.download({
@@ -362,8 +427,8 @@ async function downloadExcel() {
       saveAs: true
     });
 
-    log(`Downloaded ${filename}`);
-    return { success: true, filename };
+    log(`Downloaded ${filename} (${allOrders.length} orders)`);
+    return { success: true, filename, count: allOrders.length };
   } catch (error) {
     log('Download error: ' + error.message, 'error');
     return { error: error.message };
@@ -374,6 +439,7 @@ async function downloadExcel() {
  * Get current status
  */
 function getStatus() {
+  const remaining = state.orderIds.length - state.currentOrderIndex;
   return {
     isRunning: state.isRunning,
     phase: state.phase,
@@ -382,6 +448,8 @@ function getStatus() {
     collected: state.collectedData.length,
     success: state.success,
     failed: state.failed,
+    skipped: state.skipped,
+    remaining: remaining > 0 ? remaining : 0,
     totalAmount: state.totalAmount,
     currentOrderId: state.orderIds[state.currentOrderIndex],
     stopped: state.shouldStop && !state.isRunning,
