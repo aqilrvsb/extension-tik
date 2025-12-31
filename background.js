@@ -71,6 +71,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Flag to prevent multiple collect calls
+let collectCalled = false;
+
 // Listen for tab updates
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (tabId === state.currentTabId && changeInfo.status === 'complete' && state.isRunning) {
@@ -80,7 +83,13 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (!state.isRunning || state.shouldStop) return;
 
       if (state.phase === 'collecting' && tab.url.includes('/order') && !tab.url.includes('/detail')) {
-        collectOrderIds();
+        // Only call collect once per session
+        if (!collectCalled) {
+          collectCalled = true;
+          collectOrderIds();
+        } else {
+          console.log('[Background] collectOrderIds already called, skipping');
+        }
       } else if (state.phase === 'processing' && tab.url.includes('/order/detail')) {
         if (!state.isProcessingOrder) {
           processCurrentOrder();
@@ -97,6 +106,9 @@ async function handleStart(message) {
   if (state.isRunning) {
     return { error: 'Already running' };
   }
+
+  // Reset collect flag for new session
+  collectCalled = false;
 
   // Load existing orders from storage
   const storage = await chrome.storage.local.get(['exportedOrders']);

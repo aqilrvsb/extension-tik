@@ -14,10 +14,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   switch (message.type) {
     case 'COLLECT_ORDER_IDS':
       collectOrderIds(message.maxOrders).then(orderIds => {
-        chrome.runtime.sendMessage({
-          type: 'ORDER_IDS_COLLECTED',
-          orderIds
-        });
+        // Only send if we actually collected (not skipped)
+        if (orderIds !== null) {
+          chrome.runtime.sendMessage({
+            type: 'ORDER_IDS_COLLECTED',
+            orderIds
+          });
+        } else {
+          console.log('[Content] Collection was skipped, not sending result');
+        }
       });
       sendResponse({ started: true });
       return false;
@@ -36,6 +41,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 // Flag to prevent multiple simultaneous collections
 let isCollecting = false;
+let lastCollectionTime = 0;
 
 /**
  * Get total shipped count from page
@@ -97,12 +103,22 @@ function getShippedCount() {
  * With pagination - 20 orders per page, clicks through pages
  */
 async function collectOrderIds(maxOrders = 100) {
-  // Prevent multiple simultaneous calls
+  const now = Date.now();
+
+  // Prevent multiple simultaneous calls (with 5 second cooldown)
   if (isCollecting) {
     console.log('[Content] Already collecting, skipping duplicate call');
-    return [];
+    return null; // Return null to indicate skip, not empty array
   }
+
+  // Prevent rapid re-calls within 5 seconds
+  if (now - lastCollectionTime < 5000) {
+    console.log('[Content] Called too recently, skipping');
+    return null;
+  }
+
   isCollecting = true;
+  lastCollectionTime = now;
 
   console.log('[Content] ========================================');
   console.log('[Content] Starting order collection, max:', maxOrders);
@@ -114,6 +130,12 @@ async function collectOrderIds(maxOrders = 100) {
   try {
     // Wait for page to fully load
     await sleep(3000);
+
+    // Check if we're on the right page
+    if (!window.location.href.includes('/order')) {
+      console.log('[Content] Not on order page, skipping');
+      return [];
+    }
 
     // Get shipped count and validate maxOrders
     const shippedCount = getShippedCount();
@@ -133,6 +155,14 @@ async function collectOrderIds(maxOrders = 100) {
     // Collect from page 1
     collectOrdersFromPage(orderIds, orderPattern, actualMax);
     console.log('[Content] Page 1 collected:', orderIds.length, 'orders');
+
+    // If no orders found on page 1, wait more and retry
+    if (orderIds.length === 0) {
+      console.log('[Content] No orders on page 1, waiting more...');
+      await sleep(3000);
+      collectOrdersFromPage(orderIds, orderPattern, actualMax);
+      console.log('[Content] Page 1 retry:', orderIds.length, 'orders');
+    }
 
     // Go through more pages if needed
     for (let page = 2; page <= pagesNeeded && orderIds.length < actualMax; page++) {
