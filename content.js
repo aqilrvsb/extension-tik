@@ -34,70 +34,150 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 });
 
+// Flag to prevent multiple simultaneous collections
+let isCollecting = false;
+
+/**
+ * Get total shipped count from page
+ * Looks for: <div>Shipped</div><div style="...">1,261</div>
+ * Or: "Found 1261 orders"
+ */
+function getShippedCount() {
+  // Method 1: Find the Shipped tab with adjacent count div
+  // Structure: <div>Shipped</div><div style="margin-left: 2px;...">1,261</div>
+  const shippedDivs = document.querySelectorAll('div');
+  for (const div of shippedDivs) {
+    if (div.textContent?.trim() === 'Shipped') {
+      // Check next sibling for the count
+      const nextDiv = div.nextElementSibling;
+      if (nextDiv) {
+        const countText = nextDiv.textContent?.trim();
+        const count = parseInt(countText.replace(/,/g, ''));
+        if (!isNaN(count) && count > 0) {
+          console.log('[Content] Found shipped count from Shipped tab:', count);
+          return count;
+        }
+      }
+    }
+  }
+
+  // Method 2: Find by data attribute
+  const shippedTab = document.querySelector('[data-log_click_for="shipped"]');
+  if (shippedTab) {
+    const countMatch = shippedTab.textContent?.match(/([\d,]+)/);
+    if (countMatch) {
+      const count = parseInt(countMatch[1].replace(/,/g, ''));
+      console.log('[Content] Found shipped count from data attribute:', count);
+      return count;
+    }
+  }
+
+  // Method 3: Try to find "Found X orders" text
+  const foundText = document.body.innerText.match(/Found\s+([\d,]+)\s+orders/i);
+  if (foundText) {
+    const count = parseInt(foundText[1].replace(/,/g, ''));
+    console.log('[Content] Found shipped count from "Found X orders":', count);
+    return count;
+  }
+
+  // Method 4: Regex for "Shipped" followed by number
+  const shippedMatch = document.body.innerText.match(/Shipped\s*([\d,]+)/i);
+  if (shippedMatch) {
+    const count = parseInt(shippedMatch[1].replace(/,/g, ''));
+    console.log('[Content] Found shipped count from regex:', count);
+    return count;
+  }
+
+  console.log('[Content] Could not find shipped count, defaulting to 10000');
+  return 10000; // Default high number
+}
+
 /**
  * Collect order IDs from the shipped orders list page
  * With pagination - 20 orders per page, clicks through pages
  */
 async function collectOrderIds(maxOrders = 100) {
-  console.log('[Content] Collecting order IDs, max:', maxOrders);
+  // Prevent multiple simultaneous calls
+  if (isCollecting) {
+    console.log('[Content] Already collecting, skipping duplicate call');
+    return [];
+  }
+  isCollecting = true;
+
+  console.log('[Content] ========================================');
+  console.log('[Content] Starting order collection, max:', maxOrders);
+  console.log('[Content] ========================================');
 
   const orderIds = [];
   const orderPattern = /5\d{16,18}/g;
 
-  // Wait for page to load
-  await sleep(2000);
-
-  // Scroll to bottom to ensure pagination is loaded
-  window.scrollTo(0, document.body.scrollHeight);
-  await sleep(1000);
-  window.scrollTo(0, 0);
-  await sleep(500);
-
-  // Calculate pages needed (20 orders per page)
-  const pagesNeeded = Math.ceil(maxOrders / 20);
-  console.log('[Content] Need', pagesNeeded, 'pages for', maxOrders, 'orders');
-
-  // Debug: Check pagination exists
-  const paginationItems = document.querySelectorAll('.core-pagination-item');
-  console.log('[Content] Found', paginationItems.length, 'pagination items');
-
-  // Collect from page 1
-  collectOrdersFromPage(orderIds, orderPattern, maxOrders);
-  console.log('[Content] Page 1:', orderIds.length, 'orders');
-
-  // Go through more pages if needed
-  for (let page = 2; page <= pagesNeeded && orderIds.length < maxOrders; page++) {
-    // Scroll to pagination
-    window.scrollTo(0, document.body.scrollHeight);
-    await sleep(500);
-
-    // Click the page number
-    const clicked = clickPage(page);
-    if (!clicked) {
-      console.log('[Content] Could not click page', page);
-      break;
-    }
-
-    // Wait for page to load new content
+  try {
+    // Wait for page to fully load
     await sleep(3000);
 
-    // Scroll back up to see orders
+    // Get shipped count and validate maxOrders
+    const shippedCount = getShippedCount();
+    const actualMax = Math.min(maxOrders, shippedCount);
+    console.log('[Content] Shipped count:', shippedCount, ', Requested:', maxOrders, ', Will collect:', actualMax);
+
+    // Scroll to bottom to ensure pagination is loaded
+    window.scrollTo(0, document.body.scrollHeight);
+    await sleep(1500);
     window.scrollTo(0, 0);
-    await sleep(500);
+    await sleep(1000);
 
-    // Collect orders from this page
-    const before = orderIds.length;
-    collectOrdersFromPage(orderIds, orderPattern, maxOrders);
-    console.log('[Content] Page', page, ':', orderIds.length - before, 'new orders, total:', orderIds.length);
+    // Calculate pages needed (20 orders per page)
+    const pagesNeeded = Math.ceil(actualMax / 20);
+    console.log('[Content] Need', pagesNeeded, 'pages for', actualMax, 'orders');
 
-    // Stop if no new orders found
-    if (orderIds.length === before) {
-      console.log('[Content] No new orders on page', page);
-      break;
+    // Collect from page 1
+    collectOrdersFromPage(orderIds, orderPattern, actualMax);
+    console.log('[Content] Page 1 collected:', orderIds.length, 'orders');
+
+    // Go through more pages if needed
+    for (let page = 2; page <= pagesNeeded && orderIds.length < actualMax; page++) {
+      console.log('[Content] --- Attempting page', page, '---');
+
+      // Scroll to pagination
+      window.scrollTo(0, document.body.scrollHeight);
+      await sleep(1000);
+
+      // Click the page number using aria-label
+      const clicked = await clickPage(page);
+      if (!clicked) {
+        console.log('[Content] FAILED to click page', page, '- stopping pagination');
+        break;
+      }
+
+      // Wait for page to load new content
+      console.log('[Content] Waiting for page', page, 'to load...');
+      await sleep(3000);
+
+      // Scroll back up to see orders
+      window.scrollTo(0, 0);
+      await sleep(1000);
+
+      // Collect orders from this page
+      const before = orderIds.length;
+      collectOrdersFromPage(orderIds, orderPattern, actualMax);
+      const newCount = orderIds.length - before;
+      console.log('[Content] Page', page, ':', newCount, 'new orders, total:', orderIds.length);
+
+      // Stop if no new orders found
+      if (newCount === 0) {
+        console.log('[Content] No new orders on page', page, '- stopping');
+        break;
+      }
     }
+
+    console.log('[Content] ========================================');
+    console.log('[Content] TOTAL COLLECTED:', orderIds.length, 'order IDs');
+    console.log('[Content] ========================================');
+
+  } finally {
+    isCollecting = false;
   }
 
-  console.log('[Content] Total collected:', orderIds.length, 'order IDs');
   return orderIds;
 }
 
@@ -123,28 +203,44 @@ function collectOrdersFromPage(orderIds, orderPattern, maxOrders) {
 
 /**
  * Click a specific page number in pagination
+ * Uses aria-label="Page X" which is the exact TikTok selector
  */
-function clickPage(pageNum) {
-  // Find pagination items with class "core-pagination-item"
-  const paginationItems = document.querySelectorAll('.core-pagination-item');
+async function clickPage(pageNum) {
+  console.log('[Content] Looking for page', pageNum, 'button...');
 
+  // Scroll to make sure pagination is visible
+  window.scrollTo(0, document.body.scrollHeight);
+  await sleep(500);
+
+  // Method 1: Use aria-label (EXACT match for TikTok)
+  // TikTok uses: <li class="core-pagination-item" aria-label="Page 2">2</li>
+  const pageByLabel = document.querySelector(`[aria-label="Page ${pageNum}"]`);
+  if (pageByLabel) {
+    console.log('[Content] Clicking page', pageNum, 'via aria-label="Page X"');
+    pageByLabel.click();
+    return true;
+  }
+
+  // Method 2: Click "Next" button (aria-label="Next")
+  const nextBtn = document.querySelector('.core-pagination-item-next, [aria-label="Next"]');
+  if (nextBtn && !nextBtn.classList.contains('core-pagination-item-disabled')) {
+    console.log('[Content] Clicking NEXT button to go to page', pageNum);
+    nextBtn.click();
+    return true;
+  }
+
+  // Method 3: Find core-pagination-item with matching text
+  const paginationItems = document.querySelectorAll('.core-pagination-item');
   for (const item of paginationItems) {
     const text = item.textContent?.trim();
     if (text === String(pageNum)) {
-      console.log('[Content] Clicking page', pageNum);
+      console.log('[Content] Clicking page', pageNum, 'via core-pagination-item text');
       item.click();
       return true;
     }
   }
 
-  // Fallback: try aria-label
-  const pageByLabel = document.querySelector(`[aria-label="Page ${pageNum}"]`);
-  if (pageByLabel) {
-    console.log('[Content] Clicking page', pageNum, 'via aria-label');
-    pageByLabel.click();
-    return true;
-  }
-
+  console.log('[Content] Could not find page', pageNum, 'button');
   return false;
 }
 
