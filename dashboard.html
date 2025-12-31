@@ -362,6 +362,9 @@
           <button class="btn btn-danger" onclick="clearAllData()">
             🗑️ Clear All
           </button>
+          <button class="btn btn-secondary" onclick="debugStorage()" style="background: #6c757d;">
+            🔍 Debug
+          </button>
         </div>
       </div>
 
@@ -457,34 +460,48 @@
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
           console.log('[Dashboard] Chrome storage available');
 
-          // Use callback style for better compatibility
+          // Use Promise wrapper for chrome.storage.local.get
           chrome.storage.local.get(['exportedOrders'], function(result) {
-            console.log('[Dashboard] Storage result:', result);
+            console.log('[Dashboard] Raw storage result:', JSON.stringify(result));
 
             if (chrome.runtime.lastError) {
-              console.error('[Dashboard] Storage error:', chrome.runtime.lastError);
+              console.error('[Dashboard] Storage error:', chrome.runtime.lastError.message);
+              showError('Storage error: ' + chrome.runtime.lastError.message);
               return;
             }
 
             orders = result.exportedOrders || [];
             console.log('[Dashboard] Loaded', orders.length, 'orders');
+            console.log('[Dashboard] First order sample:', orders[0]);
 
             updateStats();
             renderTable();
             document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
           });
         } else {
-          console.log('[Dashboard] Chrome storage NOT available, using sample data');
-          // Demo mode - load sample data for testing outside extension
-          orders = getSampleData();
-          updateStats();
-          renderTable();
-          document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+          console.log('[Dashboard] Chrome storage NOT available');
+          console.log('[Dashboard] chrome:', typeof chrome);
+          console.log('[Dashboard] chrome.storage:', typeof chrome !== 'undefined' ? chrome.storage : 'N/A');
+
+          // Show error message instead of sample data
+          showError('Chrome storage not available. Make sure you opened this page from the extension.');
         }
 
       } catch (error) {
         console.error('[Dashboard] Error loading orders:', error);
+        showError('Error: ' + error.message);
       }
+    }
+
+    // Show error message
+    function showError(message) {
+      const loadingState = document.getElementById('loadingState');
+      loadingState.innerHTML = `
+        <div style="color: #dc3545; font-size: 16px;">⚠️ ${message}</div>
+        <div style="margin-top: 10px; font-size: 12px; color: #666;">
+          Open DevTools (F12) → Console to see debug logs
+        </div>
+      `;
     }
 
     // Refresh data manually
@@ -613,6 +630,44 @@
         console.error('Error clearing data:', error);
         alert('Failed to clear data: ' + error.message);
       }
+    }
+
+    // Debug storage - show all keys and values
+    async function debugStorage() {
+      console.log('[Dashboard] === DEBUG STORAGE ===');
+
+      if (typeof chrome === 'undefined') {
+        alert('Chrome API not available');
+        return;
+      }
+
+      if (!chrome.storage) {
+        alert('chrome.storage not available');
+        return;
+      }
+
+      if (!chrome.storage.local) {
+        alert('chrome.storage.local not available');
+        return;
+      }
+
+      // Get ALL storage data
+      chrome.storage.local.get(null, function(items) {
+        console.log('[Dashboard] ALL storage items:', items);
+        console.log('[Dashboard] Storage keys:', Object.keys(items));
+
+        if (items.exportedOrders) {
+          console.log('[Dashboard] exportedOrders count:', items.exportedOrders.length);
+          console.log('[Dashboard] exportedOrders data:', items.exportedOrders);
+        } else {
+          console.log('[Dashboard] exportedOrders is EMPTY or UNDEFINED');
+        }
+
+        // Show alert with summary
+        const keys = Object.keys(items);
+        const orderCount = items.exportedOrders ? items.exportedOrders.length : 0;
+        alert(`Storage Keys: ${keys.join(', ')}\n\nExported Orders: ${orderCount}\n\nCheck console (F12) for full data.`);
+      });
     }
 
     // Sample data for demo/testing
