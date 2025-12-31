@@ -5,10 +5,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TikTok Orders Dashboard</title>
 
-  <!-- DataTables CSS -->
-  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
-  <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.dataTables.min.css">
-  <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.dataTables.min.css">
+  <!-- Local DataTables CSS -->
+  <link rel="stylesheet" href="lib/dataTables.min.css">
+  <link rel="stylesheet" href="lib/buttons.dataTables.min.css">
+  <link rel="stylesheet" href="lib/responsive.dataTables.min.css">
 
   <style>
     * {
@@ -132,18 +132,19 @@
       background: #c82333;
     }
 
-    .btn-success {
-      background: #28a745;
+    .btn-secondary {
+      background: #6c757d;
       color: white;
     }
 
-    .btn-success:hover {
-      background: #218838;
+    .btn-secondary:hover {
+      background: #5a6268;
     }
 
     .btn-group {
       display: flex;
       gap: 10px;
+      flex-wrap: wrap;
     }
 
     /* DataTables customization */
@@ -240,17 +241,6 @@
       opacity: 0.9;
     }
 
-    .status-badge {
-      padding: 4px 10px;
-      border-radius: 20px;
-      font-size: 12px;
-      font-weight: 600;
-    }
-
-    .status-shipped { background: #e8f5e9; color: #2e7d32; }
-    .status-transit { background: #fff3e0; color: #f57c00; }
-    .status-delivered { background: #e3f2fd; color: #1976d2; }
-
     .loading {
       text-align: center;
       padding: 50px;
@@ -300,6 +290,7 @@
     .last-updated {
       font-size: 12px;
       color: #999;
+      margin-top: 15px;
     }
 
     /* Responsive */
@@ -323,7 +314,7 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>📦 TikTok Orders Dashboard</h1>
+      <h1>TikTok Orders Dashboard</h1>
       <p>Live view of exported orders from Chrome Extension</p>
     </div>
 
@@ -350,21 +341,15 @@
     <!-- Orders Table -->
     <div class="card">
       <div class="card-header">
-        <div class="card-title">📋 Exported Orders</div>
+        <div class="card-title">Exported Orders</div>
         <div class="btn-group">
           <div class="auto-refresh">
             <input type="checkbox" id="autoRefresh" checked>
             <label for="autoRefresh">Auto-refresh (5s)</label>
           </div>
-          <button class="btn btn-primary" onclick="refreshData()">
-            🔄 Refresh
-          </button>
-          <button class="btn btn-danger" onclick="clearAllData()">
-            🗑️ Clear All
-          </button>
-          <button class="btn btn-secondary" onclick="debugStorage()" style="background: #6c757d;">
-            🔍 Debug
-          </button>
+          <button class="btn btn-primary" id="refreshBtn">Refresh</button>
+          <button class="btn btn-danger" id="clearBtn">Clear All</button>
+          <button class="btn btn-secondary" id="debugBtn">Debug</button>
         </div>
       </div>
 
@@ -405,315 +390,16 @@
     </div>
   </div>
 
-  <!-- jQuery -->
-  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <!-- Local JS Libraries -->
+  <script src="lib/jquery.min.js"></script>
+  <script src="lib/jszip.min.js"></script>
+  <script src="lib/dataTables.min.js"></script>
+  <script src="lib/dataTables.buttons.min.js"></script>
+  <script src="lib/buttons.html5.min.js"></script>
+  <script src="lib/buttons.print.min.js"></script>
+  <script src="lib/dataTables.responsive.min.js"></script>
 
-  <!-- DataTables JS -->
-  <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
-  <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
-  <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
-  <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
-  <script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
-  <script>
-    let dataTable = null;
-    let autoRefreshInterval = null;
-    let orders = [];
-
-    // Initialize
-    document.addEventListener('DOMContentLoaded', function() {
-      loadOrders();
-
-      // Auto-refresh toggle
-      document.getElementById('autoRefresh').addEventListener('change', function() {
-        if (this.checked) {
-          startAutoRefresh();
-        } else {
-          stopAutoRefresh();
-        }
-      });
-
-      startAutoRefresh();
-    });
-
-    // Start auto-refresh
-    function startAutoRefresh() {
-      stopAutoRefresh();
-      autoRefreshInterval = setInterval(loadOrders, 5000);
-    }
-
-    // Stop auto-refresh
-    function stopAutoRefresh() {
-      if (autoRefreshInterval) {
-        clearInterval(autoRefreshInterval);
-        autoRefreshInterval = null;
-      }
-    }
-
-    // Load orders from Chrome storage
-    async function loadOrders() {
-      console.log('[Dashboard] Loading orders...');
-
-      try {
-        // Check if we're in a Chrome extension context
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          console.log('[Dashboard] Chrome storage available');
-
-          // Use Promise wrapper for chrome.storage.local.get
-          chrome.storage.local.get(['exportedOrders'], function(result) {
-            console.log('[Dashboard] Raw storage result:', JSON.stringify(result));
-
-            if (chrome.runtime.lastError) {
-              console.error('[Dashboard] Storage error:', chrome.runtime.lastError.message);
-              showError('Storage error: ' + chrome.runtime.lastError.message);
-              return;
-            }
-
-            orders = result.exportedOrders || [];
-            console.log('[Dashboard] Loaded', orders.length, 'orders');
-            console.log('[Dashboard] First order sample:', orders[0]);
-
-            updateStats();
-            renderTable();
-            document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
-          });
-        } else {
-          console.log('[Dashboard] Chrome storage NOT available');
-          console.log('[Dashboard] chrome:', typeof chrome);
-          console.log('[Dashboard] chrome.storage:', typeof chrome !== 'undefined' ? chrome.storage : 'N/A');
-
-          // Show error message instead of sample data
-          showError('Chrome storage not available. Make sure you opened this page from the extension.');
-        }
-
-      } catch (error) {
-        console.error('[Dashboard] Error loading orders:', error);
-        showError('Error: ' + error.message);
-      }
-    }
-
-    // Show error message
-    function showError(message) {
-      const loadingState = document.getElementById('loadingState');
-      loadingState.innerHTML = `
-        <div style="color: #dc3545; font-size: 16px;">⚠️ ${message}</div>
-        <div style="margin-top: 10px; font-size: 12px; color: #666;">
-          Open DevTools (F12) → Console to see debug logs
-        </div>
-      `;
-    }
-
-    // Refresh data manually
-    function refreshData() {
-      loadOrders();
-    }
-
-    // Update stats
-    function updateStats() {
-      document.getElementById('totalOrders').textContent = orders.length;
-
-      const totalAmount = orders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-      document.getElementById('totalAmount').textContent = 'RM ' + totalAmount.toFixed(2);
-
-      const today = new Date().toDateString();
-      const todayOrders = orders.filter(o => {
-        const orderDate = new Date(o.extracted_at || o.order_date);
-        return orderDate.toDateString() === today;
-      }).length;
-      document.getElementById('todayOrders').textContent = todayOrders;
-
-      const uniqueCustomers = new Set(orders.map(o => o.phone_number || o.customer_name)).size;
-      document.getElementById('uniqueCustomers').textContent = uniqueCustomers;
-    }
-
-    // Render DataTable
-    function renderTable() {
-      const loadingState = document.getElementById('loadingState');
-      const emptyState = document.getElementById('emptyState');
-      const tableContainer = document.getElementById('tableContainer');
-
-      loadingState.style.display = 'none';
-
-      if (orders.length === 0) {
-        emptyState.style.display = 'block';
-        tableContainer.style.display = 'none';
-        if (dataTable) {
-          dataTable.destroy();
-          dataTable = null;
-        }
-        return;
-      }
-
-      emptyState.style.display = 'none';
-      tableContainer.style.display = 'block';
-
-      // Prepare table data
-      const tableData = orders.map(order => [
-        order.order_id || '-',
-        order.customer_name || '-',
-        order.phone_number || '-',
-        (order.full_address || '-').substring(0, 50) + (order.full_address?.length > 50 ? '...' : ''),
-        (order.items || '-').substring(0, 40) + (order.items?.length > 40 ? '...' : ''),
-        `${order.currency || 'MYR'} ${parseFloat(order.total_amount || 0).toFixed(2)}`,
-        order.shipping_method || '-',
-        order.payment_method || '-',
-        order.order_date || '-'
-      ]);
-
-      if (dataTable) {
-        dataTable.clear();
-        dataTable.rows.add(tableData);
-        dataTable.draw();
-      } else {
-        dataTable = $('#ordersTable').DataTable({
-          data: tableData,
-          responsive: true,
-          pageLength: 25,
-          order: [[0, 'desc']],
-          dom: 'Bfrtip',
-          buttons: [
-            {
-              extend: 'csv',
-              text: '📥 Export CSV',
-              filename: 'tiktok_orders_' + new Date().toISOString().split('T')[0],
-              exportOptions: {
-                columns: ':visible'
-              }
-            },
-            {
-              extend: 'excel',
-              text: '📊 Export Excel',
-              filename: 'tiktok_orders_' + new Date().toISOString().split('T')[0],
-              exportOptions: {
-                columns: ':visible'
-              }
-            },
-            {
-              extend: 'print',
-              text: '🖨️ Print',
-              exportOptions: {
-                columns: ':visible'
-              }
-            },
-            {
-              extend: 'copy',
-              text: '📋 Copy'
-            }
-          ],
-          language: {
-            search: "🔍 Search:",
-            lengthMenu: "Show _MENU_ orders",
-            info: "Showing _START_ to _END_ of _TOTAL_ orders",
-            infoEmpty: "No orders found",
-            emptyTable: "No orders available"
-          }
-        });
-      }
-    }
-
-    // Clear all data
-    async function clearAllData() {
-      if (!confirm('Are you sure you want to clear ALL exported orders? This cannot be undone.')) {
-        return;
-      }
-
-      try {
-        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          await chrome.storage.local.remove(['exportedOrders', 'sessionState']);
-        }
-        orders = [];
-        updateStats();
-        renderTable();
-        alert('All data cleared successfully!');
-      } catch (error) {
-        console.error('Error clearing data:', error);
-        alert('Failed to clear data: ' + error.message);
-      }
-    }
-
-    // Debug storage - show all keys and values
-    async function debugStorage() {
-      console.log('[Dashboard] === DEBUG STORAGE ===');
-
-      if (typeof chrome === 'undefined') {
-        alert('Chrome API not available');
-        return;
-      }
-
-      if (!chrome.storage) {
-        alert('chrome.storage not available');
-        return;
-      }
-
-      if (!chrome.storage.local) {
-        alert('chrome.storage.local not available');
-        return;
-      }
-
-      // Get ALL storage data
-      chrome.storage.local.get(null, function(items) {
-        console.log('[Dashboard] ALL storage items:', items);
-        console.log('[Dashboard] Storage keys:', Object.keys(items));
-
-        if (items.exportedOrders) {
-          console.log('[Dashboard] exportedOrders count:', items.exportedOrders.length);
-          console.log('[Dashboard] exportedOrders data:', items.exportedOrders);
-        } else {
-          console.log('[Dashboard] exportedOrders is EMPTY or UNDEFINED');
-        }
-
-        // Show alert with summary
-        const keys = Object.keys(items);
-        const orderCount = items.exportedOrders ? items.exportedOrders.length : 0;
-        alert(`Storage Keys: ${keys.join(', ')}\n\nExported Orders: ${orderCount}\n\nCheck console (F12) for full data.`);
-      });
-    }
-
-    // Sample data for demo/testing
-    function getSampleData() {
-      return [
-        {
-          order_id: '576469215847381234',
-          customer_name: 'Ahmad bin Abdullah',
-          phone_number: '+60123456789',
-          full_address: '123 Jalan Merdeka, Taman Sentosa, 50000 Kuala Lumpur, Malaysia',
-          items: 'Wireless Earbuds Pro | Phone Case',
-          total_amount: 89.90,
-          currency: 'MYR',
-          shipping_method: 'J&T Express',
-          payment_method: 'SPayLater',
-          order_date: '31/12/2025 10:30',
-          extracted_at: new Date().toISOString()
-        },
-        {
-          order_id: '576469215847385678',
-          customer_name: 'Siti Nurhaliza',
-          phone_number: '+60198765432',
-          full_address: '456 Lorong Bunga, Taman Bahagia, 81000 Johor Bahru, Johor',
-          items: 'Bluetooth Speaker',
-          total_amount: 149.00,
-          currency: 'MYR',
-          shipping_method: 'Ninja Van',
-          payment_method: 'TikTok Wallet',
-          order_date: '31/12/2025 11:45',
-          extracted_at: new Date().toISOString()
-        },
-        {
-          order_id: '576469215847389012',
-          customer_name: 'Muthu Krishnan',
-          phone_number: '+60167891234',
-          full_address: '789 Jalan Raja, Georgetown, 10200 Penang',
-          items: 'Smart Watch | Charging Cable | Screen Protector',
-          total_amount: 259.90,
-          currency: 'MYR',
-          shipping_method: 'PosLaju',
-          payment_method: 'Credit Card',
-          order_date: '31/12/2025 14:20',
-          extracted_at: new Date().toISOString()
-        }
-      ];
-    }
-  </script>
+  <!-- Dashboard Script -->
+  <script src="dashboard.js"></script>
 </body>
 </html>
