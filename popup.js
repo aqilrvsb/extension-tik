@@ -32,6 +32,7 @@ const historyDownloadBtn = document.getElementById('historyDownloadBtn');
 const settingsSection = document.getElementById('settingsSection');
 const storageCount = document.getElementById('storageCount');
 const clearStorageBtn = document.getElementById('clearStorageBtn');
+const openDashboardBtn = document.getElementById('openDashboardBtn');
 
 // State
 let isRunning = false;
@@ -206,6 +207,11 @@ clearStorageBtn.addEventListener('click', async () => {
     progressSection.classList.remove('show');
     addLog('All data cleared', 'info');
   }
+});
+
+// Open dashboard button
+openDashboardBtn.addEventListener('click', () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL('dashboard.html') });
 });
 
 // Update UI based on status

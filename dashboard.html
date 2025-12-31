@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TikTok Orders Dashboard</title>
+
+  <!-- DataTables CSS -->
+  <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.dataTables.min.css">
+  <link rel="stylesheet" href="https://cdn.datatables.net/responsive/2.5.0/css/responsive.dataTables.min.css">
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+
+    .header {
+      text-align: center;
+      color: white;
+      margin-bottom: 30px;
+    }
+
+    .header h1 {
+      font-size: 32px;
+      margin-bottom: 10px;
+    }
+
+    .header p {
+      font-size: 16px;
+      opacity: 0.9;
+    }
+
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 30px;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .stat-card .value {
+      font-size: 36px;
+      font-weight: 700;
+      color: #667eea;
+    }
+
+    .stat-card .label {
+      font-size: 14px;
+      color: #666;
+      text-transform: uppercase;
+      margin-top: 5px;
+    }
+
+    .stat-card.success .value { color: #28a745; }
+    .stat-card.warning .value { color: #ffc107; }
+    .stat-card.info .value { color: #17a2b8; }
+
+    .card {
+      background: white;
+      border-radius: 12px;
+      padding: 25px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      margin-bottom: 20px;
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+      padding-bottom: 15px;
+      border-bottom: 1px solid #eee;
+    }
+
+    .card-title {
+      font-size: 20px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+    }
+
+    .btn-danger {
+      background: #dc3545;
+      color: white;
+    }
+
+    .btn-danger:hover {
+      background: #c82333;
+    }
+
+    .btn-success {
+      background: #28a745;
+      color: white;
+    }
+
+    .btn-success:hover {
+      background: #218838;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+
+    /* DataTables customization */
+    .dataTables_wrapper {
+      padding: 0;
+    }
+
+    table.dataTable {
+      width: 100% !important;
+      border-collapse: collapse;
+    }
+
+    table.dataTable thead th {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px 15px;
+      font-weight: 600;
+      border: none;
+    }
+
+    table.dataTable tbody td {
+      padding: 12px 15px;
+      border-bottom: 1px solid #eee;
+      vertical-align: middle;
+    }
+
+    table.dataTable tbody tr:hover {
+      background-color: #f8f9ff;
+    }
+
+    table.dataTable tbody tr.selected {
+      background-color: #e8f4fd !important;
+    }
+
+    .dataTables_filter input {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      margin-left: 10px;
+    }
+
+    .dataTables_length select {
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      margin: 0 5px;
+    }
+
+    .dataTables_info {
+      padding-top: 15px;
+      color: #666;
+    }
+
+    .dataTables_paginate {
+      padding-top: 15px;
+    }
+
+    .dataTables_paginate .paginate_button {
+      padding: 8px 14px;
+      margin: 0 2px;
+      border-radius: 6px;
+      border: 1px solid #ddd !important;
+      background: white !important;
+      color: #333 !important;
+    }
+
+    .dataTables_paginate .paginate_button.current {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+      color: white !important;
+      border: none !important;
+    }
+
+    .dataTables_paginate .paginate_button:hover {
+      background: #f0f0f0 !important;
+      color: #333 !important;
+    }
+
+    .dt-buttons {
+      margin-bottom: 15px;
+    }
+
+    .dt-buttons .dt-button {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      font-weight: 600;
+      margin-right: 10px;
+      cursor: pointer;
+    }
+
+    .dt-buttons .dt-button:hover {
+      opacity: 0.9;
+    }
+
+    .status-badge {
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-shipped { background: #e8f5e9; color: #2e7d32; }
+    .status-transit { background: #fff3e0; color: #f57c00; }
+    .status-delivered { background: #e3f2fd; color: #1976d2; }
+
+    .loading {
+      text-align: center;
+      padding: 50px;
+      color: #666;
+    }
+
+    .loading-spinner {
+      width: 50px;
+      height: 50px;
+      border: 4px solid #f3f3f3;
+      border-top: 4px solid #667eea;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 20px;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 60px 20px;
+      color: #666;
+    }
+
+    .empty-state .icon {
+      font-size: 60px;
+      margin-bottom: 20px;
+    }
+
+    .auto-refresh {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 14px;
+      color: #666;
+    }
+
+    .auto-refresh input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      cursor: pointer;
+    }
+
+    .last-updated {
+      font-size: 12px;
+      color: #999;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .stats-row {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .card-header {
+        flex-direction: column;
+        gap: 15px;
+      }
+
+      .btn-group {
+        width: 100%;
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📦 TikTok Orders Dashboard</h1>
+      <p>Live view of exported orders from Chrome Extension</p>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="value" id="totalOrders">0</div>
+        <div class="label">Total Orders</div>
+      </div>
+      <div class="stat-card success">
+        <div class="value" id="totalAmount">RM 0.00</div>
+        <div class="label">Total Amount</div>
+      </div>
+      <div class="stat-card info">
+        <div class="value" id="todayOrders">0</div>
+        <div class="label">Today's Orders</div>
+      </div>
+      <div class="stat-card warning">
+        <div class="value" id="uniqueCustomers">0</div>
+        <div class="label">Unique Customers</div>
+      </div>
+    </div>
+
+    <!-- Orders Table -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">📋 Exported Orders</div>
+        <div class="btn-group">
+          <div class="auto-refresh">
+            <input type="checkbox" id="autoRefresh" checked>
+            <label for="autoRefresh">Auto-refresh (5s)</label>
+          </div>
+          <button class="btn btn-primary" onclick="refreshData()">
+            🔄 Refresh
+          </button>
+          <button class="btn btn-danger" onclick="clearAllData()">
+            🗑️ Clear All
+          </button>
+        </div>
+      </div>
+
+      <div id="loadingState" class="loading">
+        <div class="loading-spinner"></div>
+        <p>Loading orders...</p>
+      </div>
+
+      <div id="emptyState" class="empty-state" style="display: none;">
+        <div class="icon">📭</div>
+        <h3>No Orders Yet</h3>
+        <p>Start exporting orders using the Chrome extension to see them here.</p>
+      </div>
+
+      <div id="tableContainer" style="display: none;">
+        <table id="ordersTable" class="display responsive nowrap" style="width:100%">
+          <thead>
+            <tr>
+              <th>Order ID</th>
+              <th>Customer</th>
+              <th>Phone</th>
+              <th>Address</th>
+              <th>Items</th>
+              <th>Total</th>
+              <th>Shipping</th>
+              <th>Payment</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="ordersBody">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="last-updated">
+        Last updated: <span id="lastUpdated">-</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- jQuery -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+
+  <!-- DataTables JS -->
+  <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+  <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
+  <script src="https://cdn.datatables.net/responsive/2.5.0/js/dataTables.responsive.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+
+  <script>
+    let dataTable = null;
+    let autoRefreshInterval = null;
+    let orders = [];
+
+    // Initialize
+    document.addEventListener('DOMContentLoaded', function() {
+      loadOrders();
+
+      // Auto-refresh toggle
+      document.getElementById('autoRefresh').addEventListener('change', function() {
+        if (this.checked) {
+          startAutoRefresh();
+        } else {
+          stopAutoRefresh();
+        }
+      });
+
+      startAutoRefresh();
+    });
+
+    // Start auto-refresh
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      autoRefreshInterval = setInterval(loadOrders, 5000);
+    }
+
+    // Stop auto-refresh
+    function stopAutoRefresh() {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+    }
+
+    // Load orders from Chrome storage
+    async function loadOrders() {
+      try {
+        // Check if we're in a Chrome extension context
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          const result = await chrome.storage.local.get(['exportedOrders']);
+          orders = result.exportedOrders || [];
+        } else {
+          // Demo mode - load sample data for testing outside extension
+          orders = getSampleData();
+        }
+
+        updateStats();
+        renderTable();
+        document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+
+      } catch (error) {
+        console.error('Error loading orders:', error);
+      }
+    }
+
+    // Refresh data manually
+    function refreshData() {
+      loadOrders();
+    }
+
+    // Update stats
+    function updateStats() {
+      document.getElementById('totalOrders').textContent = orders.length;
+
+      const totalAmount = orders.reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
+      document.getElementById('totalAmount').textContent = 'RM ' + totalAmount.toFixed(2);
+
+      const today = new Date().toDateString();
+      const todayOrders = orders.filter(o => {
+        const orderDate = new Date(o.extracted_at || o.order_date);
+        return orderDate.toDateString() === today;
+      }).length;
+      document.getElementById('todayOrders').textContent = todayOrders;
+
+      const uniqueCustomers = new Set(orders.map(o => o.phone_number || o.customer_name)).size;
+      document.getElementById('uniqueCustomers').textContent = uniqueCustomers;
+    }
+
+    // Render DataTable
+    function renderTable() {
+      const loadingState = document.getElementById('loadingState');
+      const emptyState = document.getElementById('emptyState');
+      const tableContainer = document.getElementById('tableContainer');
+
+      loadingState.style.display = 'none';
+
+      if (orders.length === 0) {
+        emptyState.style.display = 'block';
+        tableContainer.style.display = 'none';
+        if (dataTable) {
+          dataTable.destroy();
+          dataTable = null;
+        }
+        return;
+      }
+
+      emptyState.style.display = 'none';
+      tableContainer.style.display = 'block';
+
+      // Prepare table data
+      const tableData = orders.map(order => [
+        order.order_id || '-',
+        order.customer_name || '-',
+        order.phone_number || '-',
+        (order.full_address || '-').substring(0, 50) + (order.full_address?.length > 50 ? '...' : ''),
+        (order.items || '-').substring(0, 40) + (order.items?.length > 40 ? '...' : ''),
+        `${order.currency || 'MYR'} ${parseFloat(order.total_amount || 0).toFixed(2)}`,
+        order.shipping_method || '-',
+        order.payment_method || '-',
+        order.order_date || '-'
+      ]);
+
+      if (dataTable) {
+        dataTable.clear();
+        dataTable.rows.add(tableData);
+        dataTable.draw();
+      } else {
+        dataTable = $('#ordersTable').DataTable({
+          data: tableData,
+          responsive: true,
+          pageLength: 25,
+          order: [[0, 'desc']],
+          dom: 'Bfrtip',
+          buttons: [
+            {
+              extend: 'csv',
+              text: '📥 Export CSV',
+              filename: 'tiktok_orders_' + new Date().toISOString().split('T')[0],
+              exportOptions: {
+                columns: ':visible'
+              }
+            },
+            {
+              extend: 'excel',
+              text: '📊 Export Excel',
+              filename: 'tiktok_orders_' + new Date().toISOString().split('T')[0],
+              exportOptions: {
+                columns: ':visible'
+              }
+            },
+            {
+              extend: 'print',
+              text: '🖨️ Print',
+              exportOptions: {
+                columns: ':visible'
+              }
+            },
+            {
+              extend: 'copy',
+              text: '📋 Copy'
+            }
+          ],
+          language: {
+            search: "🔍 Search:",
+            lengthMenu: "Show _MENU_ orders",
+            info: "Showing _START_ to _END_ of _TOTAL_ orders",
+            infoEmpty: "No orders found",
+            emptyTable: "No orders available"
+          }
+        });
+      }
+    }
+
+    // Clear all data
+    async function clearAllData() {
+      if (!confirm('Are you sure you want to clear ALL exported orders? This cannot be undone.')) {
+        return;
+      }
+
+      try {
+        if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+          await chrome.storage.local.remove(['exportedOrders', 'sessionState']);
+        }
+        orders = [];
+        updateStats();
+        renderTable();
+        alert('All data cleared successfully!');
+      } catch (error) {
+        console.error('Error clearing data:', error);
+        alert('Failed to clear data: ' + error.message);
+      }
+    }
+
+    // Sample data for demo/testing
+    function getSampleData() {
+      return [
+        {
+          order_id: '576469215847381234',
+          customer_name: 'Ahmad bin Abdullah',
+          phone_number: '+60123456789',
+          full_address: '123 Jalan Merdeka, Taman Sentosa, 50000 Kuala Lumpur, Malaysia',
+          items: 'Wireless Earbuds Pro | Phone Case',
+          total_amount: 89.90,
+          currency: 'MYR',
+          shipping_method: 'J&T Express',
+          payment_method: 'SPayLater',
+          order_date: '31/12/2025 10:30',
+          extracted_at: new Date().toISOString()
+        },
+        {
+          order_id: '576469215847385678',
+          customer_name: 'Siti Nurhaliza',
+          phone_number: '+60198765432',
+          full_address: '456 Lorong Bunga, Taman Bahagia, 81000 Johor Bahru, Johor',
+          items: 'Bluetooth Speaker',
+          total_amount: 149.00,
+          currency: 'MYR',
+          shipping_method: 'Ninja Van',
+          payment_method: 'TikTok Wallet',
+          order_date: '31/12/2025 11:45',
+          extracted_at: new Date().toISOString()
+        },
+        {
+          order_id: '576469215847389012',
+          customer_name: 'Muthu Krishnan',
+          phone_number: '+60167891234',
+          full_address: '789 Jalan Raja, Georgetown, 10200 Penang',
+          items: 'Smart Watch | Charging Cable | Screen Protector',
+          total_amount: 259.90,
+          currency: 'MYR',
+          shipping_method: 'PosLaju',
+          payment_method: 'Credit Card',
+          order_date: '31/12/2025 14:20',
+          extracted_at: new Date().toISOString()
+        }
+      ];
+    }
+  </script>
+</body>
+</html>
