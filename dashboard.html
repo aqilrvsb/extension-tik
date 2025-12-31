@@ -450,22 +450,40 @@
 
     // Load orders from Chrome storage
     async function loadOrders() {
+      console.log('[Dashboard] Loading orders...');
+
       try {
         // Check if we're in a Chrome extension context
         if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-          const result = await chrome.storage.local.get(['exportedOrders']);
-          orders = result.exportedOrders || [];
+          console.log('[Dashboard] Chrome storage available');
+
+          // Use callback style for better compatibility
+          chrome.storage.local.get(['exportedOrders'], function(result) {
+            console.log('[Dashboard] Storage result:', result);
+
+            if (chrome.runtime.lastError) {
+              console.error('[Dashboard] Storage error:', chrome.runtime.lastError);
+              return;
+            }
+
+            orders = result.exportedOrders || [];
+            console.log('[Dashboard] Loaded', orders.length, 'orders');
+
+            updateStats();
+            renderTable();
+            document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
+          });
         } else {
+          console.log('[Dashboard] Chrome storage NOT available, using sample data');
           // Demo mode - load sample data for testing outside extension
           orders = getSampleData();
+          updateStats();
+          renderTable();
+          document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
         }
 
-        updateStats();
-        renderTable();
-        document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
-
       } catch (error) {
-        console.error('Error loading orders:', error);
+        console.error('[Dashboard] Error loading orders:', error);
       }
     }
 

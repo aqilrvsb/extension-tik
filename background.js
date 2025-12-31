@@ -498,6 +498,7 @@ async function handleOrderFailed(orderId, reason) {
 
 /**
  * Download collected data as CSV
+ * Note: Service workers don't have URL.createObjectURL, so we use data URL
  */
 async function downloadExcel() {
   const storage = await chrome.storage.local.get(['exportedOrders']);
@@ -539,14 +540,18 @@ async function downloadExcel() {
       ...rows.map(row => row.join(','))
     ].join('\n');
 
+    // Add BOM for Excel UTF-8 compatibility and encode as base64 data URL
     const BOM = '\uFEFF';
-    const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8' });
+    const csvWithBOM = BOM + csvContent;
 
-    const url = URL.createObjectURL(blob);
+    // Convert to base64 data URL (service workers don't have URL.createObjectURL)
+    const base64 = btoa(unescape(encodeURIComponent(csvWithBOM)));
+    const dataUrl = `data:text/csv;charset=utf-8;base64,${base64}`;
+
     const filename = `tiktok_orders_${new Date().toISOString().split('T')[0]}_${allOrders.length}orders.csv`;
 
     await chrome.downloads.download({
-      url: url,
+      url: dataUrl,
       filename: filename,
       saveAs: true
     });
