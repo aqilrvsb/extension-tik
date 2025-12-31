@@ -10,7 +10,7 @@
     }
 
     body {
-      width: 380px;
+      width: 400px;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
       min-height: 400px;
@@ -76,9 +76,9 @@
     }
 
     .progress-bar {
-      height: 8px;
+      height: 10px;
       background: #e9ecef;
-      border-radius: 4px;
+      border-radius: 5px;
       overflow: hidden;
       margin-bottom: 10px;
     }
@@ -86,7 +86,7 @@
     .progress-fill {
       height: 100%;
       background: linear-gradient(90deg, #667eea, #764ba2);
-      border-radius: 4px;
+      border-radius: 5px;
       transition: width 0.3s ease;
       width: 0%;
     }
@@ -100,20 +100,20 @@
 
     .stats-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 10px;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 8px;
       margin: 15px 0;
     }
 
     .stat-box {
       text-align: center;
-      padding: 12px;
+      padding: 10px 5px;
       background: #f8f9fa;
       border-radius: 8px;
     }
 
     .stat-value {
-      font-size: 24px;
+      font-size: 20px;
       font-weight: 700;
       color: #333;
     }
@@ -126,8 +126,12 @@
       color: #dc3545;
     }
 
+    .stat-value.skipped {
+      color: #ffc107;
+    }
+
     .stat-label {
-      font-size: 11px;
+      font-size: 10px;
       color: #666;
       text-transform: uppercase;
     }
@@ -175,6 +179,24 @@
       background: #218838;
     }
 
+    .btn-warning {
+      background: #ffc107;
+      color: #333;
+    }
+
+    .btn-warning:hover {
+      background: #e0a800;
+    }
+
+    .btn-secondary {
+      background: #6c757d;
+      color: white;
+    }
+
+    .btn-secondary:hover {
+      background: #5a6268;
+    }
+
     .btn:disabled {
       opacity: 0.6;
       cursor: not-allowed;
@@ -189,6 +211,13 @@
 
     .btn-group .btn {
       flex: 1;
+    }
+
+    .btn-group-vertical {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-top: 10px;
     }
 
     .current-order {
@@ -206,7 +235,7 @@
     }
 
     .log-section {
-      max-height: 120px;
+      max-height: 100px;
       overflow-y: auto;
       margin-top: 15px;
       padding: 10px;
@@ -257,12 +286,58 @@
     }
 
     .setting-input {
-      width: 80px;
-      padding: 6px 10px;
+      width: 60px;
+      padding: 6px 8px;
       border: 1px solid #ddd;
       border-radius: 4px;
       font-size: 13px;
       text-align: center;
+    }
+
+    .delay-inputs {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .delay-inputs span {
+      font-size: 12px;
+      color: #666;
+    }
+
+    .history-section {
+      margin-top: 15px;
+      padding: 15px;
+      background: #fff3cd;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .history-section.show {
+      display: block;
+    }
+
+    .history-header {
+      font-size: 14px;
+      font-weight: 600;
+      color: #856404;
+      margin-bottom: 10px;
+    }
+
+    .history-info {
+      font-size: 12px;
+      color: #856404;
+      margin-bottom: 10px;
+    }
+
+    .storage-info {
+      font-size: 11px;
+      color: #666;
+      text-align: center;
+      margin-top: 10px;
+      padding: 8px;
+      background: #f8f9fa;
+      border-radius: 4px;
     }
 
     .footer {
@@ -270,6 +345,20 @@
       margin-top: 15px;
       font-size: 11px;
       color: rgba(255, 255, 255, 0.7);
+    }
+
+    .clear-storage-btn {
+      font-size: 11px;
+      color: #dc3545;
+      background: none;
+      border: none;
+      cursor: pointer;
+      text-decoration: underline;
+      margin-top: 5px;
+    }
+
+    .clear-storage-btn:hover {
+      color: #c82333;
     }
   </style>
 </head>
@@ -286,6 +375,7 @@
         <div class="status-text" id="statusText">Ready to export orders</div>
       </div>
 
+      <!-- Progress Section - Always visible when has data -->
       <div class="progress-section" id="progressSection">
         <div class="progress-bar">
           <div class="progress-fill" id="progressFill"></div>
@@ -300,6 +390,7 @@
         Processing: <span id="currentOrderId">-</span>
       </div>
 
+      <!-- Stats Grid - Always visible when has data -->
       <div class="stats-grid" id="statsGrid" style="display: none;">
         <div class="stat-box">
           <div class="stat-value success" id="successCount">0</div>
@@ -310,7 +401,7 @@
           <div class="stat-label">Failed</div>
         </div>
         <div class="stat-box">
-          <div class="stat-value" id="skippedCount">0</div>
+          <div class="stat-value skipped" id="skippedCount">0</div>
           <div class="stat-label">Skipped</div>
         </div>
         <div class="stat-box">
@@ -319,35 +410,65 @@
         </div>
       </div>
 
+      <!-- Start Button (initial state) -->
       <button class="btn btn-primary" id="startBtn">
         <span>🚀</span> Start Export
       </button>
 
-      <div class="btn-group" id="actionBtns" style="display: none;">
+      <!-- Running State Buttons -->
+      <div class="btn-group" id="runningBtns" style="display: none;">
         <button class="btn btn-danger" id="stopBtn">
           <span>⏹</span> Stop
         </button>
-        <button class="btn btn-success" id="downloadBtn" disabled>
-          <span>📥</span> Download Excel
+        <button class="btn btn-success" id="downloadBtn">
+          <span>📥</span> Export CSV
         </button>
       </div>
 
-      <div class="settings-section">
+      <!-- History/Resume Section -->
+      <div class="history-section" id="historySection">
+        <div class="history-header">📋 Previous Session Found</div>
+        <div class="history-info" id="historyInfo">
+          Last session: 0 orders collected
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-warning" id="resumeBtn">
+            <span>▶️</span> Resume
+          </button>
+          <button class="btn btn-success" id="historyDownloadBtn">
+            <span>📥</span> Export CSV
+          </button>
+        </div>
+      </div>
+
+      <!-- Settings Section -->
+      <div class="settings-section" id="settingsSection">
         <div class="setting-row">
-          <span class="setting-label">Max orders to process:</span>
+          <span class="setting-label">Max orders:</span>
           <input type="number" class="setting-input" id="maxOrders" value="100" min="1" max="1000">
         </div>
         <div class="setting-row">
-          <span class="setting-label">Delay between orders (ms):</span>
-          <input type="number" class="setting-input" id="delayMs" value="2000" min="1000" max="10000">
+          <span class="setting-label">Delay (seconds):</span>
+          <div class="delay-inputs">
+            <input type="number" class="setting-input" id="delayMin" value="2" min="1" max="30" step="0.5">
+            <span>to</span>
+            <input type="number" class="setting-input" id="delayMax" value="6" min="1" max="30" step="0.5">
+          </div>
         </div>
+      </div>
+
+      <!-- Storage Info -->
+      <div class="storage-info" id="storageInfo">
+        <span id="storageCount">0</span> orders in storage
+        <br>
+        <button class="clear-storage-btn" id="clearStorageBtn">Clear all data</button>
       </div>
 
       <div class="log-section" id="logSection"></div>
     </div>
 
     <div class="footer">
-      v1.0.0 - Standalone Export Tool
+      v2.0.0 - Standalone Export Tool
     </div>
   </div>
 

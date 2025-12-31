@@ -1,5 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
+ * v2.0.0 - With resume, progress during run, and delay range
  */
 
 // DOM Elements
@@ -17,36 +18,98 @@ const failedCount = document.getElementById('failedCount');
 const skippedCount = document.getElementById('skippedCount');
 const remainingCount = document.getElementById('remainingCount');
 const startBtn = document.getElementById('startBtn');
-const actionBtns = document.getElementById('actionBtns');
+const runningBtns = document.getElementById('runningBtns');
 const stopBtn = document.getElementById('stopBtn');
 const downloadBtn = document.getElementById('downloadBtn');
 const maxOrdersInput = document.getElementById('maxOrders');
-const delayMsInput = document.getElementById('delayMs');
+const delayMinInput = document.getElementById('delayMin');
+const delayMaxInput = document.getElementById('delayMax');
 const logSection = document.getElementById('logSection');
+const historySection = document.getElementById('historySection');
+const historyInfo = document.getElementById('historyInfo');
+const resumeBtn = document.getElementById('resumeBtn');
+const historyDownloadBtn = document.getElementById('historyDownloadBtn');
+const settingsSection = document.getElementById('settingsSection');
+const storageCount = document.getElementById('storageCount');
+const clearStorageBtn = document.getElementById('clearStorageBtn');
 
 // State
 let isRunning = false;
 
-// Load saved settings
-chrome.storage.local.get(['maxOrders', 'delayMs'], (result) => {
-  if (result.maxOrders) maxOrdersInput.value = result.maxOrders;
-  if (result.delayMs) delayMsInput.value = result.delayMs;
-});
+// Initialize on popup open
+async function init() {
+  // Load saved settings
+  const settings = await chrome.storage.local.get(['maxOrders', 'delayMin', 'delayMax']);
+  if (settings.maxOrders) maxOrdersInput.value = settings.maxOrders;
+  if (settings.delayMin) delayMinInput.value = settings.delayMin;
+  if (settings.delayMax) delayMaxInput.value = settings.delayMax;
+
+  // Load storage count
+  await updateStorageCount();
+
+  // Check for previous session state
+  await checkPreviousSession();
+
+  // Get current status from background
+  chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
+    if (response) {
+      updateUI(response);
+    }
+  });
+}
+
+// Update storage count display
+async function updateStorageCount() {
+  const storage = await chrome.storage.local.get(['exportedOrders']);
+  const count = storage.exportedOrders ? storage.exportedOrders.length : 0;
+  storageCount.textContent = count;
+}
+
+// Check for previous interrupted session
+async function checkPreviousSession() {
+  const sessionData = await chrome.storage.local.get(['sessionState']);
+  const session = sessionData.sessionState;
+
+  if (session && session.orderIds && session.orderIds.length > 0 && session.currentOrderIndex < session.orderIds.length) {
+    // There's an interrupted session
+    const remaining = session.orderIds.length - session.currentOrderIndex;
+    const success = session.success || 0;
+    const failed = session.failed || 0;
+
+    historyInfo.innerHTML = `
+      Progress: ${session.currentOrderIndex}/${session.orderIds.length} orders<br>
+      Success: ${success} | Failed: ${failed} | Remaining: ${remaining}
+    `;
+    historySection.classList.add('show');
+    startBtn.style.display = 'none';
+  } else {
+    historySection.classList.remove('show');
+  }
+}
 
 // Save settings on change
 maxOrdersInput.addEventListener('change', () => {
   chrome.storage.local.set({ maxOrders: parseInt(maxOrdersInput.value) });
 });
 
-delayMsInput.addEventListener('change', () => {
-  chrome.storage.local.set({ delayMs: parseInt(delayMsInput.value) });
+delayMinInput.addEventListener('change', () => {
+  let min = parseFloat(delayMinInput.value);
+  let max = parseFloat(delayMaxInput.value);
+  if (min > max) {
+    delayMaxInput.value = min;
+    max = min;
+  }
+  chrome.storage.local.set({ delayMin: min, delayMax: max });
 });
 
-// Check current status on popup open
-chrome.runtime.sendMessage({ type: 'GET_STATUS' }, (response) => {
-  if (response) {
-    updateUI(response);
+delayMaxInput.addEventListener('change', () => {
+  let min = parseFloat(delayMinInput.value);
+  let max = parseFloat(delayMaxInput.value);
+  if (max < min) {
+    delayMinInput.value = max;
+    min = max;
   }
+  chrome.storage.local.set({ delayMin: min, delayMax: max });
 });
 
 // Listen for status updates from background
@@ -63,17 +126,40 @@ chrome.runtime.onMessage.addListener((message) => {
 // Start button click
 startBtn.addEventListener('click', async () => {
   const maxOrders = parseInt(maxOrdersInput.value) || 100;
-  const delayMs = parseInt(delayMsInput.value) || 2000;
+  const delayMin = parseFloat(delayMinInput.value) || 2;
+  const delayMax = parseFloat(delayMaxInput.value) || 6;
 
   // Send start command to background
   chrome.runtime.sendMessage({
     type: 'START_EXPORT',
     maxOrders,
-    delayMs
+    delayMinMs: delayMin * 1000,
+    delayMaxMs: delayMax * 1000
   }, (response) => {
     if (response && response.success) {
       setRunningState(true);
       addLog('Export started...', 'info');
+      historySection.classList.remove('show');
+    } else if (response && response.error) {
+      addLog('Error: ' + response.error, 'error');
+    }
+  });
+});
+
+// Resume button click
+resumeBtn.addEventListener('click', async () => {
+  const delayMin = parseFloat(delayMinInput.value) || 2;
+  const delayMax = parseFloat(delayMaxInput.value) || 6;
+
+  chrome.runtime.sendMessage({
+    type: 'RESUME_EXPORT',
+    delayMinMs: delayMin * 1000,
+    delayMaxMs: delayMax * 1000
+  }, (response) => {
+    if (response && response.success) {
+      setRunningState(true);
+      addLog('Resuming export...', 'info');
+      historySection.classList.remove('show');
     } else if (response && response.error) {
       addLog('Error: ' + response.error, 'error');
     }
@@ -87,20 +173,47 @@ stopBtn.addEventListener('click', () => {
   });
 });
 
-// Download button click
+// Download button click (during processing or after)
 downloadBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'DOWNLOAD_EXCEL' }, (response) => {
     if (response && response.success) {
-      addLog('Excel file downloaded!', 'success');
+      addLog(`Exported ${response.count} orders to CSV!`, 'success');
     } else if (response && response.error) {
       addLog('Download error: ' + response.error, 'error');
     }
   });
 });
 
+// History download button click
+historyDownloadBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'DOWNLOAD_EXCEL' }, (response) => {
+    if (response && response.success) {
+      addLog(`Exported ${response.count} orders to CSV!`, 'success');
+    } else if (response && response.error) {
+      addLog('Download error: ' + response.error, 'error');
+    }
+  });
+});
+
+// Clear storage button
+clearStorageBtn.addEventListener('click', async () => {
+  if (confirm('Are you sure you want to clear all exported orders data? This cannot be undone.')) {
+    await chrome.storage.local.remove(['exportedOrders', 'sessionState']);
+    await updateStorageCount();
+    historySection.classList.remove('show');
+    startBtn.style.display = 'block';
+    statsGrid.style.display = 'none';
+    progressSection.classList.remove('show');
+    addLog('All data cleared', 'info');
+  }
+});
+
 // Update UI based on status
 function updateUI(status) {
   isRunning = status.isRunning;
+
+  // Always show progress and stats if we have data
+  const hasData = status.total > 0 || status.success > 0 || status.failed > 0;
 
   if (status.isRunning) {
     setRunningState(true);
@@ -110,9 +223,10 @@ function updateUI(status) {
 
     // Show progress
     progressSection.classList.add('show');
-    const percent = status.total > 0 ? Math.round((status.processed / status.total) * 100) : 0;
+    const totalProcessed = status.processed + status.skipped;
+    const percent = status.total > 0 ? Math.round((totalProcessed / status.total) * 100) : 0;
     progressFill.style.width = percent + '%';
-    progressText.textContent = `${status.processed} / ${status.total} orders`;
+    progressText.textContent = `${totalProcessed} / ${status.total} orders`;
     progressPercent.textContent = percent + '%';
 
     // Show current order
@@ -120,41 +234,53 @@ function updateUI(status) {
       currentOrder.classList.add('show');
       currentOrderId.textContent = status.currentOrderId;
     }
+
+    // Show stats during processing
+    statsGrid.style.display = 'grid';
+    successCount.textContent = status.success || 0;
+    failedCount.textContent = status.failed || 0;
+    skippedCount.textContent = status.skipped || 0;
+    remainingCount.textContent = status.remaining || 0;
+
   } else {
     setRunningState(false);
     statusText.classList.remove('running');
+    currentOrder.classList.remove('show');
 
     if (status.completed) {
       statusIcon.textContent = '✅';
       statusText.textContent = 'Export completed!';
-      downloadBtn.disabled = false;
-    } else if (status.stopped) {
-      statusIcon.textContent = '⏹';
-      statusText.textContent = 'Export stopped';
-      if (status.collected > 0) {
-        downloadBtn.disabled = false;
+      // Keep progress and stats visible
+      if (hasData) {
+        progressSection.classList.add('show');
+        statsGrid.style.display = 'grid';
       }
+    } else if (status.stopped) {
+      statusIcon.textContent = '⏸️';
+      statusText.textContent = 'Export paused';
+      // Keep progress and stats visible
+      if (hasData) {
+        progressSection.classList.add('show');
+        statsGrid.style.display = 'grid';
+      }
+      // Show resume option
+      checkPreviousSession();
     } else {
       statusIcon.textContent = '📦';
       statusText.textContent = 'Ready to export orders';
     }
-
-    currentOrder.classList.remove('show');
   }
 
-  // Update stats
-  if (status.success > 0 || status.failed > 0 || status.skipped > 0 || status.remaining > 0) {
-    statsGrid.style.display = 'grid';
+  // Update stats if we have any
+  if (hasData) {
     successCount.textContent = status.success || 0;
     failedCount.textContent = status.failed || 0;
     skippedCount.textContent = status.skipped || 0;
     remainingCount.textContent = status.remaining || 0;
   }
 
-  // Enable download if we have data
-  if ((status.collected > 0 || status.success > 0) && !status.isRunning) {
-    downloadBtn.disabled = false;
-  }
+  // Update storage count
+  updateStorageCount();
 }
 
 // Set running/stopped state
@@ -163,16 +289,14 @@ function setRunningState(running) {
 
   if (running) {
     startBtn.style.display = 'none';
-    actionBtns.style.display = 'flex';
-    downloadBtn.disabled = true;
-    maxOrdersInput.disabled = true;
-    delayMsInput.disabled = true;
+    runningBtns.style.display = 'flex';
+    historySection.classList.remove('show');
+    settingsSection.style.display = 'none';
     logSection.classList.add('show');
   } else {
     startBtn.style.display = 'block';
-    actionBtns.style.display = 'none';
-    maxOrdersInput.disabled = false;
-    delayMsInput.disabled = false;
+    runningBtns.style.display = 'none';
+    settingsSection.style.display = 'block';
   }
 }
 
@@ -191,7 +315,5 @@ function addLog(text, level = 'info') {
   logSection.classList.add('show');
 }
 
-// Format currency
-function formatCurrency(amount) {
-  return 'RM ' + parseFloat(amount || 0).toFixed(2);
-}
+// Initialize
+init();

@@ -1,5 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
+ * v2.0.0 - With resume, random delay, persistent state
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -7,8 +8,8 @@
  * 3. Go to each order detail page
  * 4. Click reveal buttons to unmask data
  * 5. Extract customer data
- * 6. Store in memory
- * 7. Export to Excel when done
+ * 6. Store in chrome.storage.local (persistent)
+ * 7. Export to CSV anytime
  */
 
 // State
@@ -17,10 +18,11 @@ let state = {
   shouldStop: false,
   currentTabId: null,
   maxOrders: 100,
-  delayMs: 2000,
+  delayMinMs: 2000,
+  delayMaxMs: 6000,
   orderIds: [],
   collectedData: [],
-  existingOrderIds: [],  // Orders already in storage (to skip)
+  existingOrderIds: [],
   currentOrderIndex: 0,
   processed: 0,
   success: 0,
@@ -40,6 +42,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       handleStart(message).then(sendResponse);
       return true;
 
+    case 'RESUME_EXPORT':
+      handleResume(message).then(sendResponse);
+      return true;
+
     case 'STOP_EXPORT':
       handleStop();
       sendResponse({ stopped: true });
@@ -54,13 +60,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'ORDER_IDS_COLLECTED':
-      // Content script collected order IDs from list page
       handleOrderIdsCollected(message.orderIds);
       sendResponse({ success: true });
       return false;
 
     case 'ORDER_DATA_EXTRACTED':
-      // Content script extracted data from detail page
       handleOrderDataExtracted(message.data);
       sendResponse({ success: true });
       return false;
@@ -76,10 +80,8 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
       if (!state.isRunning || state.shouldStop) return;
 
       if (state.phase === 'collecting' && tab.url.includes('/order') && !tab.url.includes('/detail')) {
-        // On order list page - collect order IDs
         collectOrderIds();
       } else if (state.phase === 'processing' && tab.url.includes('/order/detail')) {
-        // On order detail page - extract data
         if (!state.isProcessingOrder) {
           processCurrentOrder();
         }
@@ -89,7 +91,7 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 });
 
 /**
- * Handle start command
+ * Handle start command (fresh start)
  */
 async function handleStart(message) {
   if (state.isRunning) {
@@ -106,7 +108,8 @@ async function handleStart(message) {
     shouldStop: false,
     currentTabId: null,
     maxOrders: message.maxOrders || 100,
-    delayMs: message.delayMs || 2000,
+    delayMinMs: message.delayMinMs || 2000,
+    delayMaxMs: message.delayMaxMs || 6000,
     orderIds: [],
     collectedData: [],
     existingOrderIds: existingOrderIds,
@@ -120,11 +123,13 @@ async function handleStart(message) {
     phase: 'collecting'
   };
 
+  // Clear previous session
+  await chrome.storage.local.remove(['sessionState']);
+
   broadcastStatus('Opening TikTok Seller Center...');
   log(`Starting export... (${existingOrderIds.length} orders already in storage)`);
 
   try {
-    // Open TikTok Seller Center shipped tab
     const tab = await chrome.tabs.create({
       url: 'https://seller-my.tiktok.com/order?selected_sort=6&tab=shipped',
       active: true
@@ -140,15 +145,113 @@ async function handleStart(message) {
 }
 
 /**
+ * Handle resume command (continue from previous session)
+ */
+async function handleResume(message) {
+  if (state.isRunning) {
+    return { error: 'Already running' };
+  }
+
+  // Load session state
+  const sessionData = await chrome.storage.local.get(['sessionState', 'exportedOrders']);
+  const session = sessionData.sessionState;
+
+  if (!session || !session.orderIds || session.orderIds.length === 0) {
+    return { error: 'No previous session found' };
+  }
+
+  const existingOrderIds = sessionData.exportedOrders ? sessionData.exportedOrders.map(o => o.order_id) : [];
+
+  // Restore state from session
+  state = {
+    isRunning: true,
+    shouldStop: false,
+    currentTabId: null,
+    maxOrders: session.maxOrders || 100,
+    delayMinMs: message.delayMinMs || 2000,
+    delayMaxMs: message.delayMaxMs || 6000,
+    orderIds: session.orderIds,
+    collectedData: [],
+    existingOrderIds: existingOrderIds,
+    currentOrderIndex: session.currentOrderIndex || 0,
+    processed: session.processed || 0,
+    success: session.success || 0,
+    failed: session.failed || 0,
+    skipped: session.skipped || 0,
+    totalAmount: session.totalAmount || 0,
+    isProcessingOrder: false,
+    phase: 'processing'
+  };
+
+  const remaining = state.orderIds.length - state.currentOrderIndex;
+  broadcastStatus(`Resuming... ${remaining} orders remaining`);
+  log(`Resuming export from order ${state.currentOrderIndex + 1}/${state.orderIds.length}`);
+
+  try {
+    // Open a new tab and start processing
+    const tab = await chrome.tabs.create({
+      url: 'https://seller-my.tiktok.com/order?tab=shipped',
+      active: true
+    });
+    state.currentTabId = tab.id;
+
+    // Wait for tab to load then start processing
+    setTimeout(() => {
+      if (state.isRunning && !state.shouldStop) {
+        processNextOrder();
+      }
+    }, 3000);
+
+    return { success: true };
+  } catch (error) {
+    state.isRunning = false;
+    log('Error: ' + error.message, 'error');
+    return { error: error.message };
+  }
+}
+
+/**
  * Handle stop command
  */
-function handleStop() {
+async function handleStop() {
   state.shouldStop = true;
   state.isRunning = false;
-  state.phase = 'idle';
+
+  // Save session state for resume
+  await saveSessionState();
 
   broadcastStatus('Export stopped', false, true);
-  log('Export stopped by user');
+  log('Export stopped - you can resume later');
+}
+
+/**
+ * Save current session state for resume
+ */
+async function saveSessionState() {
+  if (state.orderIds.length > 0) {
+    await chrome.storage.local.set({
+      sessionState: {
+        orderIds: state.orderIds,
+        currentOrderIndex: state.currentOrderIndex,
+        maxOrders: state.maxOrders,
+        processed: state.processed,
+        success: state.success,
+        failed: state.failed,
+        skipped: state.skipped,
+        totalAmount: state.totalAmount,
+        savedAt: new Date().toISOString()
+      }
+    });
+    console.log('[Background] Session state saved');
+  }
+}
+
+/**
+ * Clear session state (when completed)
+ */
+async function clearSessionState() {
+  await chrome.storage.local.remove(['sessionState']);
+  console.log('[Background] Session state cleared');
 }
 
 /**
@@ -174,7 +277,7 @@ async function collectOrderIds() {
 /**
  * Handle collected order IDs from content script
  */
-function handleOrderIdsCollected(orderIds) {
+async function handleOrderIdsCollected(orderIds) {
   if (!state.isRunning || state.shouldStop) return;
 
   state.orderIds = orderIds;
@@ -184,9 +287,13 @@ function handleOrderIdsCollected(orderIds) {
     log('No orders found!', 'error');
     state.isRunning = false;
     state.phase = 'done';
+    await clearSessionState();
     broadcastStatus('No orders found', false, false, true);
     return;
   }
+
+  // Save session state
+  await saveSessionState();
 
   // Start processing orders
   state.phase = 'processing';
@@ -207,16 +314,16 @@ async function processNextOrder() {
     const orderId = state.orderIds[state.currentOrderIndex];
 
     if (state.existingOrderIds.includes(orderId)) {
-      // Skip this order - already exported
       const orderIdShort = orderId.slice(-8);
       log(`⏭ Skipping ...${orderIdShort} (already exported)`, 'info');
       state.skipped++;
       state.currentOrderIndex++;
       broadcastStatus();
+      // Save progress
+      await saveSessionState();
       continue;
     }
 
-    // Found an order to process
     break;
   }
 
@@ -227,8 +334,9 @@ async function processNextOrder() {
     log(`Export completed! ${state.success} success, ${state.failed} failed, ${state.skipped} skipped`);
     broadcastStatus('Export completed!', false, false, true);
 
-    // Save collected data to storage
+    // Save collected data and clear session
     await saveToStorage();
+    await clearSessionState();
     return;
   }
 
@@ -266,10 +374,8 @@ async function processCurrentOrder() {
   const orderId = state.orderIds[state.currentOrderIndex];
 
   try {
-    // Wait for page to render
     await sleep(1500);
 
-    // Tell content script to extract data
     await chrome.tabs.sendMessage(state.currentTabId, {
       type: 'EXTRACT_ORDER_DATA',
       orderId
@@ -283,14 +389,13 @@ async function processCurrentOrder() {
 /**
  * Handle extracted order data from content script
  */
-function handleOrderDataExtracted(data) {
+async function handleOrderDataExtracted(data) {
   if (!state.isRunning) return;
 
   const orderId = state.orderIds[state.currentOrderIndex];
   const orderIdShort = orderId.slice(-8);
 
   if (data && data.hasData && !data.isMasked) {
-    // Success!
     state.success++;
     state.collectedData.push({
       order_id: orderId,
@@ -304,12 +409,15 @@ function handleOrderDataExtracted(data) {
       phone_number: data.phone_number || '',
       full_address: data.full_address || '',
       order_status: data.status || '',
-      order_date: data.order_date || '',  // Time created
+      order_date: data.order_date || '',
       extracted_at: new Date().toISOString()
     });
 
     state.totalAmount += parseFloat(data.total_amount || 0);
     log(`✓ Order ...${orderIdShort}: ${data.name}`, 'success');
+
+    // Save to storage immediately (for live CSV export)
+    await saveToStorage();
   } else {
     state.failed++;
     log(`✗ Order ...${orderIdShort}: ${data.error || 'Data masked/unavailable'}`, 'error');
@@ -319,10 +427,22 @@ function handleOrderDataExtracted(data) {
   state.currentOrderIndex++;
   state.isProcessingOrder = false;
 
+  // Save session state
+  await saveSessionState();
+
   broadcastStatus();
 
-  // Continue to next order after delay
-  setTimeout(() => processNextOrder(), state.delayMs);
+  // Random delay between min and max
+  const delay = getRandomDelay();
+  log(`Waiting ${(delay / 1000).toFixed(1)}s before next order...`, 'info');
+  setTimeout(() => processNextOrder(), delay);
+}
+
+/**
+ * Get random delay between min and max
+ */
+function getRandomDelay() {
+  return state.delayMinMs + Math.random() * (state.delayMaxMs - state.delayMinMs);
 }
 
 /**
@@ -332,28 +452,34 @@ async function saveToStorage() {
   if (state.collectedData.length === 0) return;
 
   try {
-    // Get existing data
     const storage = await chrome.storage.local.get(['exportedOrders']);
     const existingOrders = storage.exportedOrders || [];
 
-    // Merge new data (avoid duplicates)
     const existingIds = new Set(existingOrders.map(o => o.order_id));
     const newOrders = state.collectedData.filter(o => !existingIds.has(o.order_id));
 
+    if (newOrders.length === 0) return;
+
     const allOrders = [...existingOrders, ...newOrders];
 
-    // Save to storage
     await chrome.storage.local.set({ exportedOrders: allOrders });
-    log(`Saved ${newOrders.length} new orders to storage (total: ${allOrders.length})`);
+
+    // Update existing IDs list
+    state.existingOrderIds = allOrders.map(o => o.order_id);
+
+    // Clear collectedData since it's now saved
+    state.collectedData = [];
+
+    log(`Saved ${newOrders.length} new orders (total: ${allOrders.length})`);
   } catch (error) {
-    log('Failed to save to storage: ' + error.message, 'error');
+    log('Failed to save: ' + error.message, 'error');
   }
 }
 
 /**
  * Handle order failure
  */
-function handleOrderFailed(orderId, reason) {
+async function handleOrderFailed(orderId, reason) {
   const orderIdShort = orderId.slice(-8);
   state.failed++;
   state.processed++;
@@ -361,17 +487,19 @@ function handleOrderFailed(orderId, reason) {
   state.isProcessingOrder = false;
 
   log(`✗ Order ...${orderIdShort}: ${reason}`, 'error');
+
+  // Save session state
+  await saveSessionState();
+
   broadcastStatus();
 
-  // Continue to next order
   setTimeout(() => processNextOrder(), 1000);
 }
 
 /**
- * Download collected data as Excel/CSV
+ * Download collected data as CSV
  */
 async function downloadExcel() {
-  // Get all data from storage
   const storage = await chrome.storage.local.get(['exportedOrders']);
   const allOrders = storage.exportedOrders || [];
 
@@ -380,7 +508,6 @@ async function downloadExcel() {
   }
 
   try {
-    // Create CSV content with all columns
     const headers = [
       'Order ID',
       'Shipping Method',
@@ -412,15 +539,12 @@ async function downloadExcel() {
       ...rows.map(row => row.join(','))
     ].join('\n');
 
-    // Add BOM for Excel UTF-8 compatibility
     const BOM = '\uFEFF';
     const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8' });
 
-    // Create download URL
     const url = URL.createObjectURL(blob);
     const filename = `tiktok_orders_${new Date().toISOString().split('T')[0]}_${allOrders.length}orders.csv`;
 
-    // Download file
     await chrome.downloads.download({
       url: url,
       filename: filename,
@@ -487,4 +611,4 @@ function sleep(ms) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started');
+console.log('[TikTok Order Exporter] Background service worker started v2.0.0');
