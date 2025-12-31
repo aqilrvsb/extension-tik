@@ -142,20 +142,17 @@ function renderTable() {
   emptyState.style.display = 'none';
   tableContainer.style.display = 'block';
 
-  // Prepare table data
+  // Prepare table data - columns: Date, Order ID, Customer, Phone, Address, Items, Total, Payment
   var tableData = orders.map(function(order) {
-    var address = order.full_address || '-';
-    var items = order.items || '-';
     return [
-      order.order_id || '-',
-      order.customer_name || '-',
-      order.phone_number || '-',
-      address.substring(0, 50) + (address.length > 50 ? '...' : ''),
-      items.substring(0, 40) + (items.length > 40 ? '...' : ''),
-      (order.currency || 'MYR') + ' ' + parseFloat(order.total_amount || 0).toFixed(2),
-      order.shipping_method || '-',
-      order.payment_method || '-',
-      order.order_date || '-'
+      order.order_date || '-',                                    // Date Order (Time created)
+      order.order_id || '-',                                       // Order ID
+      order.customer_name || '-',                                  // Customer
+      order.phone_number || '-',                                   // Phone
+      order.full_address || '-',                                   // Address (full, will wrap)
+      order.items || '-',                                          // Items (full, will wrap)
+      'RM ' + parseFloat(order.total_amount || 0).toFixed(2),     // Total
+      order.payment_method || '-'                                  // Payment
     ];
   });
 
@@ -166,9 +163,10 @@ function renderTable() {
   } else {
     dataTable = $('#ordersTable').DataTable({
       data: tableData,
-      responsive: true,
+      responsive: false,  // Disable responsive to show all columns
+      scrollX: true,      // Enable horizontal scroll
       pageLength: 25,
-      order: [[0, 'desc']],
+      order: [[0, 'desc']],  // Sort by date descending
       dom: 'Bfrtip',
       buttons: [
         {
@@ -198,6 +196,16 @@ function renderTable() {
           extend: 'copy',
           text: 'Copy'
         }
+      ],
+      columnDefs: [
+        { targets: 0, width: '130px' },   // Date
+        { targets: 1, width: '150px' },   // Order ID
+        { targets: 2, width: '150px' },   // Customer
+        { targets: 3, width: '120px' },   // Phone
+        { targets: 4, width: '250px', className: 'wrap-text' },  // Address - wrap
+        { targets: 5, width: '300px', className: 'wrap-text' },  // Items - wrap
+        { targets: 6, width: '80px' },    // Total
+        { targets: 7, width: '120px' }    // Payment
       ],
       language: {
         search: "Search:",

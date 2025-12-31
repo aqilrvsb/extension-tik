@@ -293,6 +293,24 @@
       margin-top: 15px;
     }
 
+    /* Text wrapping for long content */
+    .wrap-text {
+      white-space: pre-wrap !important;
+      word-wrap: break-word !important;
+      max-width: 300px;
+      line-height: 1.4;
+    }
+
+    table.dataTable tbody td.wrap-text {
+      white-space: pre-wrap !important;
+      word-wrap: break-word !important;
+    }
+
+    /* Make sure table doesn't collapse */
+    table.dataTable {
+      table-layout: fixed;
+    }
+
     /* Responsive */
     @media (max-width: 768px) {
       .stats-row {
@@ -365,18 +383,17 @@
       </div>
 
       <div id="tableContainer" style="display: none;">
-        <table id="ordersTable" class="display responsive nowrap" style="width:100%">
+        <table id="ordersTable" class="display" style="width:100%">
           <thead>
             <tr>
+              <th>Date Order</th>
               <th>Order ID</th>
               <th>Customer</th>
               <th>Phone</th>
               <th>Address</th>
               <th>Items</th>
               <th>Total</th>
-              <th>Shipping</th>
               <th>Payment</th>
-              <th>Date</th>
             </tr>
           </thead>
           <tbody id="ordersBody">

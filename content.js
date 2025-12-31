@@ -403,70 +403,91 @@ function extractOrderStatus() {
 }
 
 /**
- * Extract total amount from page
+ * Extract total amount from page - looks for "Total" row with RM amount
  */
 function extractTotalAmount() {
   const result = { amount: 0, currency: 'MYR' };
 
-  // Look for price patterns like "RM 70.19" or "MYR 70.19"
-  const pricePattern = /(RM|MYR)\s*([\d,]+\.?\d*)/gi;
-  const pageText = document.body.innerText;
-
-  // Find all prices and get the largest one (usually the total)
-  let matches;
-  const prices = [];
-  while ((matches = pricePattern.exec(pageText)) !== null) {
-    const amount = parseFloat(matches[2].replace(',', ''));
-    if (!isNaN(amount)) {
-      prices.push({ amount, currency: 'MYR' });
-    }
-  }
-
-  // Look for "Total" label nearby
-  const totalElements = document.querySelectorAll('*');
-  for (const el of totalElements) {
-    if (el.textContent?.toLowerCase().includes('total') && el.children.length === 0) {
-      const parent = el.parentElement;
+  // Method 1: Look for the specific "Total" label in the right sidebar
+  const allDivs = document.querySelectorAll('div');
+  for (const div of allDivs) {
+    const text = div.textContent?.trim();
+    // Look for div that contains exactly "Total" as a label
+    if (text === 'Total' && div.children.length === 0) {
+      // Look in parent or sibling for the price
+      const parent = div.parentElement;
       if (parent) {
-        const priceMatch = parent.textContent.match(/(RM|MYR)\s*([\d,]+\.?\d*)/i);
+        const priceMatch = parent.textContent.match(/RM\s*([\d,]+\.?\d*)/i);
         if (priceMatch) {
-          result.amount = parseFloat(priceMatch[2].replace(',', ''));
+          result.amount = parseFloat(priceMatch[1].replace(',', ''));
+          console.log('[Content] Found Total amount:', result.amount);
           return result;
         }
       }
     }
   }
 
-  // Return the largest price found (likely the total)
-  if (prices.length > 0) {
-    prices.sort((a, b) => b.amount - a.amount);
-    return prices[0];
+  // Method 2: Look for row with "Total" and price on same line
+  const pageText = document.body.innerText;
+  const lines = pageText.split('\n');
+  for (const line of lines) {
+    if (line.includes('Total') && !line.includes('subtotal') && !line.includes('Subtotal')) {
+      const priceMatch = line.match(/RM\s*([\d,]+\.?\d*)/i);
+      if (priceMatch) {
+        result.amount = parseFloat(priceMatch[1].replace(',', ''));
+        console.log('[Content] Found Total from line:', result.amount);
+        return result;
+      }
+    }
+  }
+
+  // Method 3: Find the price next to "Total" text
+  const totalPattern = /Total\s*RM\s*([\d,]+\.?\d*)/i;
+  const match = pageText.match(totalPattern);
+  if (match) {
+    result.amount = parseFloat(match[1].replace(',', ''));
+    return result;
   }
 
   return result;
 }
 
 /**
- * Extract order date from page
+ * Extract order date from page - looks for "Time created" field
  */
 function extractOrderDate() {
-  // Look for date patterns
-  const datePattern = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s*(\d{1,2}:\d{2}(:\d{2})?)?/;
-
-  // Look in common date locations
-  const pageText = document.body.innerText;
-  const match = pageText.match(datePattern);
-
-  if (match) {
-    return match[0];
+  // Method 1: Look for "Time created" label specifically
+  const allDivs = document.querySelectorAll('div');
+  for (const div of allDivs) {
+    const text = div.textContent?.trim();
+    if (text === 'Time created' && div.children.length === 0) {
+      // Look in parent for the date value
+      const parent = div.parentElement;
+      if (parent) {
+        // Look for date pattern in siblings
+        const fullText = parent.textContent;
+        const dateMatch = fullText.match(/(\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2})/);
+        if (dateMatch) {
+          console.log('[Content] Found Time created:', dateMatch[1]);
+          return dateMatch[1];
+        }
+      }
+    }
   }
 
-  // Look for "Today" or time patterns
-  const timePattern = /Today\s+(\d{1,2}:\d{2}(:\d{2})?)/i;
-  const timeMatch = pageText.match(timePattern);
-  if (timeMatch) {
-    const today = new Date().toLocaleDateString('en-GB');
-    return `${today} ${timeMatch[1]}`;
+  // Method 2: Look for date patterns with time
+  const pageText = document.body.innerText;
+  const datePattern = /(\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}:\d{2})/;
+  const match = pageText.match(datePattern);
+  if (match) {
+    return match[1];
+  }
+
+  // Method 3: Simple date pattern
+  const simpleDatePattern = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})\s*(\d{1,2}:\d{2}(:\d{2})?)?/;
+  const simpleMatch = pageText.match(simpleDatePattern);
+  if (simpleMatch) {
+    return simpleMatch[0];
   }
 
   return new Date().toISOString().split('T')[0];
@@ -576,72 +597,103 @@ function extractPaymentMethod() {
 
 /**
  * Extract items/products and SKU IDs from page
+ * Gets product name + variant (e.g., "Product Name\n4 Botol + FREE 1 Botol")
  */
 function extractItemsAndSku() {
   const items = [];
   const skuIds = [];
 
-  // Look for SKU patterns - typically alphanumeric codes
+  // Look for SKU ID - the long numeric code
   const pageText = document.body.innerText;
+  const skuIdMatch = pageText.match(/SKU\s*ID:?\s*(\d{15,20})/i);
+  if (skuIdMatch) {
+    skuIds.push(skuIdMatch[1]);
+  }
 
-  // SKU pattern - look for SKU: or SKU ID: followed by alphanumeric
-  const skuMatches = pageText.match(/SKU\s*(?:ID)?:?\s*([A-Za-z0-9\-_]+)/gi);
-  if (skuMatches) {
-    for (const match of skuMatches) {
-      const skuValue = match.replace(/SKU\s*(?:ID)?:?\s*/i, '').trim();
-      if (skuValue && !skuIds.includes(skuValue)) {
-        skuIds.push(skuValue);
+  // Method 1: Find product in the parcel section
+  // Look for elements near product images
+  const productImages = document.querySelectorAll('img[src*="p16-oec"], img[src*="product"]');
+
+  for (const img of productImages) {
+    // Get the container that holds the product info
+    let container = img.parentElement;
+    for (let i = 0; i < 5 && container; i++) {
+      container = container.parentElement;
+    }
+
+    if (container) {
+      const containerText = container.innerText;
+      const lines = containerText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
+      // Find product name - usually a long descriptive text
+      for (const line of lines) {
+        // Skip short lines, prices, dates, and SKU labels
+        if (line.length < 10) continue;
+        if (line.match(/^RM\s*[\d.]+/)) continue;
+        if (line.match(/^SKU\s*ID/i)) continue;
+        if (line.match(/^\d{1,2}\/\d{1,2}\/\d{4}/)) continue;
+        if (line.match(/x\s*\d+$/)) continue;  // Skip "x 1" quantity
+        if (line.includes('parcel') && line.includes('item')) continue;
+
+        // This looks like a product name
+        if (line.length > 15 && !items.includes(line)) {
+          items.push(line);
+          break;
+        }
+      }
+
+      // Find variant/option (e.g., "4 Botol + FREE 1 Botol")
+      for (const line of lines) {
+        if (line.length >= 5 && line.length < 50) {
+          // Check if it looks like a variant (contains numbers or size descriptors)
+          if (line.match(/\d+\s*(botol|pcs|unit|pack|box|ml|g|kg)/i) ||
+              line.match(/FREE|BONUS/i) ||
+              line.match(/^\d+\s+[A-Za-z]/)) {
+            // Add as variant to the last item
+            if (items.length > 0 && !items[items.length - 1].includes(line)) {
+              items[items.length - 1] += '\n' + line;
+            }
+            break;
+          }
+        }
       }
     }
   }
 
-  // Look for product names in the page
-  // Products usually appear in a list with images and names
-
-  // Method 1: Look for product name elements
-  const productElements = document.querySelectorAll('[class*="product"], [class*="item"], [class*="sku"]');
-  for (const el of productElements) {
-    const text = el.textContent?.trim();
-    // Filter for reasonable product name length
-    if (text && text.length > 5 && text.length < 200 && !text.includes('RM')) {
-      // Check if it looks like a product name (not too many numbers)
-      const digitRatio = (text.match(/\d/g) || []).length / text.length;
-      if (digitRatio < 0.3 && !items.includes(text)) {
-        items.push(text);
+  // Method 2: Look for product name near "SKU ID:" label
+  if (items.length === 0) {
+    const allDivs = document.querySelectorAll('div');
+    for (const div of allDivs) {
+      const text = div.textContent?.trim();
+      if (text && text.startsWith('SKU ID:')) {
+        // Get parent and look for product name
+        let parent = div.parentElement;
+        for (let i = 0; i < 3 && parent; i++) {
+          const parentText = parent.innerText;
+          const lines = parentText.split('\n').map(l => l.trim()).filter(l => l.length > 20);
+          for (const line of lines) {
+            if (!line.includes('SKU') && !line.match(/^RM/) && !items.includes(line)) {
+              items.push(line);
+              break;
+            }
+          }
+          if (items.length > 0) break;
+          parent = parent.parentElement;
+        }
       }
     }
   }
 
-  // Method 2: Look in table rows or list items near product images
-  const images = document.querySelectorAll('img[src*="product"], img[src*="item"], img[src*="p16"]');
-  for (const img of images) {
-    const parent = img.closest('div, tr, li');
-    if (parent) {
-      // Look for text that's not a price
-      const allText = parent.innerText;
-      const lines = allText.split('\n').filter(line => {
-        const l = line.trim();
-        return l.length > 3 && l.length < 200 && !l.includes('RM') && !l.match(/^\d+$/);
-      });
-      if (lines.length > 0 && !items.includes(lines[0])) {
-        items.push(lines[0]);
-      }
-
-      // Also look for SKU in this context
-      const skuMatch = allText.match(/SKU\s*(?:ID)?:?\s*([A-Za-z0-9\-_]+)/i);
-      if (skuMatch && !skuIds.includes(skuMatch[1])) {
-        skuIds.push(skuMatch[1]);
-      }
-    }
-  }
-
-  // Remove duplicates and join
+  // Clean up items - remove duplicates and format nicely
   const uniqueItems = [...new Set(items)];
   const uniqueSkus = [...new Set(skuIds)];
 
+  console.log('[Content] Extracted items:', uniqueItems);
+  console.log('[Content] Extracted SKUs:', uniqueSkus);
+
   return {
-    items: uniqueItems.slice(0, 5).join(' | '), // Limit to 5 items
-    skuId: uniqueSkus.slice(0, 5).join(', ')    // Limit to 5 SKUs
+    items: uniqueItems.slice(0, 3).join(' | '),
+    skuId: uniqueSkus.slice(0, 3).join(', ')
   };
 }
 
