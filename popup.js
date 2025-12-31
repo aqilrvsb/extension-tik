@@ -66,26 +66,55 @@ async function updateStorageCount() {
   storageCount.textContent = count;
 }
 
-// Check for previous interrupted session
+// Check for previous interrupted session and auto-resume
 async function checkPreviousSession() {
   const sessionData = await chrome.storage.local.get(['sessionState']);
   const session = sessionData.sessionState;
 
   if (session && session.orderIds && session.orderIds.length > 0 && session.currentOrderIndex < session.orderIds.length) {
-    // There's an interrupted session
+    // There's an interrupted session - AUTO RESUME
     const remaining = session.orderIds.length - session.currentOrderIndex;
     const success = session.success || 0;
     const failed = session.failed || 0;
 
-    historyInfo.innerHTML = `
-      Progress: ${session.currentOrderIndex}/${session.orderIds.length} orders<br>
-      Success: ${success} | Failed: ${failed} | Remaining: ${remaining}
-    `;
-    historySection.classList.add('show');
-    startBtn.style.display = 'none';
+    console.log('[Popup] Found interrupted session, auto-resuming...');
+    console.log('[Popup] Progress:', session.currentOrderIndex, '/', session.orderIds.length);
+
+    // Show brief notification then auto-resume
+    statusIcon.textContent = '🔄';
+    statusText.textContent = `Auto-resuming: ${remaining} orders remaining...`;
+
+    // Auto-resume after a short delay
+    setTimeout(() => {
+      autoResume();
+    }, 500);
   } else {
     historySection.classList.remove('show');
   }
+}
+
+// Auto-resume function
+function autoResume() {
+  const delayMin = parseFloat(delayMinInput.value) || 2;
+  const delayMax = parseFloat(delayMaxInput.value) || 6;
+
+  chrome.runtime.sendMessage({
+    type: 'RESUME_EXPORT',
+    delayMinMs: delayMin * 1000,
+    delayMaxMs: delayMax * 1000
+  }, (response) => {
+    if (response && response.success) {
+      setRunningState(true);
+      addLog('Auto-resumed export...', 'info');
+      historySection.classList.remove('show');
+    } else if (response && response.error) {
+      // If auto-resume fails, show manual resume option
+      console.log('[Popup] Auto-resume failed:', response.error);
+      historySection.classList.add('show');
+      startBtn.style.display = 'none';
+      addLog('Auto-resume failed: ' + response.error, 'error');
+    }
+  });
 }
 
 // Save settings on change
