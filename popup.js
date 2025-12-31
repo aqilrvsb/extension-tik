@@ -1,6 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.3.0 - Faster pagination + time estimation
+ * v2.4.0 - Auto-retry failed orders (up to 3 attempts)
  */
 
 // Supabase config for license validation

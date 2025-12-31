@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.3.0 - Faster pagination, time estimation
+ * v2.4.0 - Auto-retry failed orders (up to 3 attempts)
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -11,6 +11,9 @@
  * 6. Store in chrome.storage.local (persistent)
  * 7. Export to CSV anytime
  */
+
+// Constants
+const MAX_RETRIES = 3;
 
 // State
 let state = {
@@ -30,7 +33,9 @@ let state = {
   skipped: 0,
   totalAmount: 0,
   isProcessingOrder: false,
-  phase: 'idle' // idle, collecting, processing, done
+  phase: 'idle', // idle, collecting, processing, done
+  retryCount: {}, // Track retry attempts per order: { orderId: attemptCount }
+  retried: 0 // Count of orders that succeeded after retry
 };
 
 // Listen for messages from popup
@@ -132,7 +137,9 @@ async function handleStart(message) {
     skipped: 0,
     totalAmount: 0,
     isProcessingOrder: false,
-    phase: 'collecting'
+    phase: 'collecting',
+    retryCount: {},
+    retried: 0
   };
 
   // Clear previous session
@@ -192,7 +199,9 @@ async function handleResume(message) {
     skipped: session.skipped || 0,
     totalAmount: session.totalAmount || 0,
     isProcessingOrder: false,
-    phase: 'processing'
+    phase: 'processing',
+    retryCount: session.retryCount || {},
+    retried: session.retried || 0
   };
 
   const remaining = state.orderIds.length - state.currentOrderIndex;
@@ -263,6 +272,8 @@ async function saveSessionState() {
         failed: state.failed,
         skipped: state.skipped,
         totalAmount: state.totalAmount,
+        retryCount: state.retryCount,
+        retried: state.retried,
         savedAt: new Date().toISOString()
       }
     });
@@ -355,7 +366,8 @@ async function processNextOrder() {
     // All done!
     state.isRunning = false;
     state.phase = 'done';
-    log(`Export completed! ${state.success} success, ${state.failed} failed, ${state.skipped} skipped`);
+    const retriedMsg = state.retried > 0 ? `, ${state.retried} recovered by retry` : '';
+    log(`Export completed! ${state.success} success, ${state.failed} failed, ${state.skipped} skipped${retriedMsg}`);
     broadcastStatus('Export completed!', false, false, true);
 
     // Save collected data and clear session
@@ -418,8 +430,17 @@ async function handleOrderDataExtracted(data) {
 
   const orderId = state.orderIds[state.currentOrderIndex];
   const orderIdShort = orderId.slice(-8);
+  const currentRetries = state.retryCount[orderId] || 0;
 
   if (data && data.hasData && !data.isMasked) {
+    // Success!
+    if (currentRetries > 0) {
+      state.retried++; // Track orders recovered by retry
+      log(`✓ Order ...${orderIdShort}: ${data.name} (recovered after ${currentRetries} retry)`, 'success');
+    } else {
+      log(`✓ Order ...${orderIdShort}: ${data.name}`, 'success');
+    }
+
     state.success++;
     state.collectedData.push({
       order_id: orderId,
@@ -438,18 +459,40 @@ async function handleOrderDataExtracted(data) {
     });
 
     state.totalAmount += parseFloat(data.total_amount || 0);
-    log(`✓ Order ...${orderIdShort}: ${data.name}`, 'success');
 
     // Save to storage immediately (for live CSV export)
     await saveToStorage();
-  } else {
-    state.failed++;
-    log(`✗ Order ...${orderIdShort}: ${data.error || 'Data masked/unavailable'}`, 'error');
-  }
 
-  state.processed++;
-  state.currentOrderIndex++;
-  state.isProcessingOrder = false;
+    // Move to next order
+    state.processed++;
+    state.currentOrderIndex++;
+    state.isProcessingOrder = false;
+  } else {
+    // Failed - check if we should retry
+    if (currentRetries < MAX_RETRIES) {
+      state.retryCount[orderId] = currentRetries + 1;
+      log(`⟳ Order ...${orderIdShort}: Retry ${currentRetries + 1}/${MAX_RETRIES} (${data.error || 'Data masked'})`, 'warn');
+      state.isProcessingOrder = false;
+
+      // Save session state before retry
+      await saveSessionState();
+
+      // Wait longer before retry (increasing backoff)
+      const retryDelay = 3000 + (currentRetries * 2000);
+      log(`Waiting ${(retryDelay / 1000).toFixed(1)}s before retry...`, 'info');
+      setTimeout(() => retryCurrentOrder(), retryDelay);
+      return; // Don't proceed to next order yet
+    } else {
+      // Max retries exceeded - mark as failed
+      state.failed++;
+      log(`✗ Order ...${orderIdShort}: Failed after ${MAX_RETRIES} retries (${data.error || 'Data masked/unavailable'})`, 'error');
+
+      // Move to next order
+      state.processed++;
+      state.currentOrderIndex++;
+      state.isProcessingOrder = false;
+    }
+  }
 
   // Save session state
   await saveSessionState();
@@ -460,6 +503,31 @@ async function handleOrderDataExtracted(data) {
   const delay = getRandomDelay();
   log(`Waiting ${(delay / 1000).toFixed(1)}s before next order...`, 'info');
   setTimeout(() => processNextOrder(), delay);
+}
+
+/**
+ * Retry current order (reload page and try extraction again)
+ */
+async function retryCurrentOrder() {
+  if (state.shouldStop || !state.isRunning) return;
+  if (state.currentOrderIndex >= state.orderIds.length) return;
+
+  const orderId = state.orderIds[state.currentOrderIndex];
+  const orderIdShort = orderId.slice(-8);
+  const retryNum = state.retryCount[orderId] || 1;
+
+  log(`Retrying order ...${orderIdShort} (attempt ${retryNum}/${MAX_RETRIES})...`);
+  broadcastStatus(`Retrying order ${state.currentOrderIndex + 1}/${state.orderIds.length} (attempt ${retryNum})`, true, false, false, orderId);
+
+  // Navigate to order detail page again
+  const url = `https://seller-my.tiktok.com/order/detail?order_no=${orderId}&shop_region=MY`;
+
+  try {
+    await chrome.tabs.update(state.currentTabId, { url });
+  } catch (error) {
+    log('Navigation error on retry: ' + error.message, 'error');
+    handleOrderFailed(orderId, 'Navigation failed on retry');
+  }
 }
 
 /**
@@ -505,12 +573,31 @@ async function saveToStorage() {
  */
 async function handleOrderFailed(orderId, reason) {
   const orderIdShort = orderId.slice(-8);
+  const currentRetries = state.retryCount[orderId] || 0;
+
+  // Check if we should retry
+  if (currentRetries < MAX_RETRIES) {
+    state.retryCount[orderId] = currentRetries + 1;
+    log(`⟳ Order ...${orderIdShort}: Retry ${currentRetries + 1}/${MAX_RETRIES} (${reason})`, 'warn');
+    state.isProcessingOrder = false;
+
+    // Save session state before retry
+    await saveSessionState();
+
+    // Wait longer before retry (increasing backoff)
+    const retryDelay = 3000 + (currentRetries * 2000);
+    log(`Waiting ${(retryDelay / 1000).toFixed(1)}s before retry...`, 'info');
+    setTimeout(() => retryCurrentOrder(), retryDelay);
+    return;
+  }
+
+  // Max retries exceeded
   state.failed++;
   state.processed++;
   state.currentOrderIndex++;
   state.isProcessingOrder = false;
 
-  log(`✗ Order ...${orderIdShort}: ${reason}`, 'error');
+  log(`✗ Order ...${orderIdShort}: Failed after ${MAX_RETRIES} retries (${reason})`, 'error');
 
   // Save session state
   await saveSessionState();
@@ -593,6 +680,8 @@ async function downloadExcel() {
  */
 function getStatus() {
   const remaining = state.orderIds.length - state.currentOrderIndex;
+  const currentOrderId = state.orderIds[state.currentOrderIndex];
+  const currentRetry = currentOrderId ? (state.retryCount[currentOrderId] || 0) : 0;
   return {
     isRunning: state.isRunning,
     phase: state.phase,
@@ -602,9 +691,11 @@ function getStatus() {
     success: state.success,
     failed: state.failed,
     skipped: state.skipped,
+    retried: state.retried,
     remaining: remaining > 0 ? remaining : 0,
     totalAmount: state.totalAmount,
-    currentOrderId: state.orderIds[state.currentOrderIndex],
+    currentOrderId: currentOrderId,
+    currentRetry: currentRetry,
     stopped: state.shouldStop && !state.isRunning,
     completed: state.phase === 'done' && !state.isRunning
   };
@@ -640,4 +731,4 @@ function sleep(ms) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.3.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.4.0');
