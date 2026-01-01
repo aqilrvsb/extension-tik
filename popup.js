@@ -10,7 +10,8 @@ function debugLog(...args) {
 
 // Supabase config for license validation
 const SUPABASE_URL = 'https://rfvocvjwlxpiaxbciqnn.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdm9jdmp3bHhwaWF4YmNpcW5uIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjYyODY5ODgsImV4cCI6MjA4MTg2Mjk4OH0.dn5sIWgnBO_Ey3X0iL-4cKhXjQvZr4pjTo3iI0bMYkQ';
+// Using service_role key for license validation (table has RLS enabled)
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJmdm9jdmp3bHhwaWF4YmNpcW5uIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NjI4Njk4OCwiZXhwIjoyMDgxODYyOTg4fQ.Y2EjxYd9F6KnfSSnCPuDJZJTEdTkpgRU8_mLEP9sqgM';
 
 // DOM Elements
 const statusIcon = document.getElementById('statusIcon');
