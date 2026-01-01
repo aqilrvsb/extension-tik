@@ -1,6 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.8.1 - License shop validation
+ * v2.9.0 - Shop code license validation (no license key input needed)
  */
 
 const DEBUG = false; // Set to true for verbose logging
@@ -52,17 +52,8 @@ const dateRangeInputs = document.getElementById('dateRangeInputs');
 const filterStartDate = document.getElementById('filterStartDate');
 const filterEndDate = document.getElementById('filterEndDate');
 
-// License modal elements
-const licenseModal = document.getElementById('licenseModal');
-const licenseInput = document.getElementById('licenseInput');
-const licenseError = document.getElementById('licenseError');
-const licenseStatus = document.getElementById('licenseStatus');
-const validateLicenseBtn = document.getElementById('validateLicenseBtn');
-const cancelLicenseBtn = document.getElementById('cancelLicenseBtn');
-
 // State
 let isRunning = false;
-let pendingStartAction = null; // Store pending start action after license validation
 let exportStartTime = null; // Track when export started for time estimation
 
 // Time estimate elements
@@ -131,12 +122,13 @@ async function getCurrentShopCode() {
 }
 
 /**
- * Validate license key against Supabase
+ * Validate shop code against Supabase licenses table
+ * Now validates by shop_code directly instead of license_key
  */
-async function validateLicense(licenseKey, shopCode) {
+async function validateShopCode(shopCode) {
   try {
     const response = await fetch(
-      `${SUPABASE_URL}/rest/v1/licenses?license_key=eq.${encodeURIComponent(licenseKey)}&select=*`,
+      `${SUPABASE_URL}/rest/v1/licenses?shop_code=eq.${encodeURIComponent(shopCode)}&select=*`,
       {
         headers: {
           'apikey': SUPABASE_ANON_KEY,
@@ -152,7 +144,7 @@ async function validateLicense(licenseKey, shopCode) {
     const licenses = await response.json();
 
     if (licenses.length === 0) {
-      return { valid: false, error: 'License key not found' };
+      return { valid: false, error: `Shop ${shopCode} is not licensed. Please contact admin.` };
     }
 
     const license = licenses[0];
@@ -173,14 +165,6 @@ async function validateLicense(licenseKey, shopCode) {
 
     if (now > validUntil) {
       return { valid: false, error: 'License has expired' };
-    }
-
-    // Check if shop code matches (if we have shop code)
-    if (shopCode && license.shop_code !== shopCode) {
-      return {
-        valid: false,
-        error: `License is for shop ${license.shop_code}, not ${shopCode}`
-      };
     }
 
     // Calculate days remaining
@@ -241,28 +225,8 @@ async function cacheLicense(licenseKey, validUntil, shopCode) {
 }
 
 /**
- * Show license modal
- */
-function showLicenseModal() {
-  licenseModal.classList.add('show');
-  licenseInput.value = '';
-  licenseInput.classList.remove('error', 'success');
-  licenseError.classList.remove('show');
-  licenseStatus.className = 'license-status';
-  licenseStatus.textContent = '';
-  licenseInput.focus();
-}
-
-/**
- * Hide license modal
- */
-function hideLicenseModal() {
-  licenseModal.classList.remove('show');
-  pendingStartAction = null;
-}
-
-/**
  * Check license before starting export
+ * Now validates by shop code directly - no license key input needed
  * Returns true if license is valid, false otherwise
  */
 async function checkLicenseBeforeStart() {
@@ -272,103 +236,36 @@ async function checkLicenseBeforeStart() {
   if (!currentShopCode) {
     // Must be on TikTok Seller Center page to detect shop code
     addLog('Please open TikTok Seller Center first', 'error');
+    addLog('Make sure shop code is visible on the page', 'info');
     return false;
   }
 
   debugLog('[License] Current shop code:', currentShopCode);
+  addLog(`Validating shop: ${currentShopCode}...`, 'info');
 
-  // Check cached license
+  // Check cached license first
   const cachedLicense = await checkCachedLicense();
 
-  if (cachedLicense) {
-    // Verify shop code matches
-    if (cachedLicense.shopCode === currentShopCode) {
-      debugLog('[License] Using cached license for shop:', currentShopCode);
-      return true;
-    } else {
-      // Shop code mismatch - license is for different shop
-      debugLog('[License] Shop code mismatch:', cachedLicense.shopCode, 'vs', currentShopCode);
-      addLog(`License is for shop ${cachedLicense.shopCode}, not ${currentShopCode}`, 'error');
-      showLicenseModal();
-      return false;
-    }
+  if (cachedLicense && cachedLicense.shopCode === currentShopCode) {
+    debugLog('[License] Using cached license for shop:', currentShopCode);
+    addLog(`License valid! ${Math.ceil((new Date(cachedLicense.validUntil) - new Date()) / (1000 * 60 * 60 * 24))} days remaining`, 'success');
+    return true;
   }
 
-  // No valid cache, show license modal
-  showLicenseModal();
-  return false;
-}
-
-// License modal event handlers
-validateLicenseBtn.addEventListener('click', async () => {
-  const licenseKey = licenseInput.value.trim().toUpperCase();
-
-  if (!licenseKey || licenseKey.length < 15) {
-    licenseInput.classList.add('error');
-    licenseError.textContent = 'Please enter a valid license key';
-    licenseError.classList.add('show');
-    return;
-  }
-
-  // Show loading state
-  validateLicenseBtn.disabled = true;
-  validateLicenseBtn.innerHTML = '<span>⏳</span> Validating...';
-
-  // Get current shop code
-  const shopCode = await getCurrentShopCode();
-
-  // Validate license
-  const result = await validateLicense(licenseKey, shopCode);
-
-  validateLicenseBtn.disabled = false;
-  validateLicenseBtn.innerHTML = '<span>🔓</span> Activate';
+  // Validate shop code against Supabase
+  const result = await validateShopCode(currentShopCode);
 
   if (result.valid) {
-    // Success!
-    licenseInput.classList.remove('error');
-    licenseInput.classList.add('success');
-    licenseStatus.className = 'license-status valid';
-    licenseStatus.textContent = `License valid! ${result.daysRemaining} days remaining`;
-
-    // Cache the license
-    await cacheLicense(licenseKey, result.license.valid_until, result.license.shop_code);
-
-    // Hide modal after a short delay
-    setTimeout(() => {
-      hideLicenseModal();
-
-      // Execute pending action
-      if (pendingStartAction) {
-        pendingStartAction();
-        pendingStartAction = null;
-      }
-    }, 1000);
+    // Cache the license for this shop
+    await cacheLicense(result.license.license_key, result.license.valid_until, currentShopCode);
+    addLog(`License valid! ${result.daysRemaining} days remaining`, 'success');
+    return true;
   } else {
-    // Failed
-    licenseInput.classList.add('error');
-    licenseInput.classList.remove('success');
-    licenseError.textContent = result.error;
-    licenseError.classList.add('show');
+    // License validation failed
+    addLog(result.error, 'error');
+    return false;
   }
-});
-
-cancelLicenseBtn.addEventListener('click', () => {
-  hideLicenseModal();
-});
-
-// Format license input (add dashes)
-licenseInput.addEventListener('input', (e) => {
-  let value = e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-
-  // Add dashes every 4 characters
-  if (value.length > 4) {
-    value = value.match(/.{1,4}/g).join('-');
-  }
-
-  e.target.value = value.substring(0, 19); // Max 19 chars (XXXX-XXXX-XXXX-XXXX)
-  licenseInput.classList.remove('error');
-  licenseError.classList.remove('show');
-});
+}
 
 // ========================================
 // MAIN FUNCTIONS
@@ -570,12 +467,28 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Start button click
 startBtn.addEventListener('click', async () => {
+  // REQUIRE date filter to be enabled
+  if (!enableDateFilter.checked) {
+    addLog('Date filter is required! Please enable it and select date range.', 'error');
+    // Highlight the date filter checkbox
+    enableDateFilter.parentElement.style.animation = 'shake 0.5s';
+    setTimeout(() => {
+      enableDateFilter.parentElement.style.animation = '';
+    }, 500);
+    return;
+  }
+
+  // Validate date range is set
+  if (!filterStartDate.value || !filterEndDate.value) {
+    addLog('Please select both start and end dates.', 'error');
+    return;
+  }
+
   // Check license first
   const hasValidLicense = await checkLicenseBeforeStart();
 
   if (!hasValidLicense) {
-    // License check failed, store pending action for after license validation
-    pendingStartAction = () => startExport();
+    // License check failed - no modal needed anymore, just show error
     return;
   }
 
