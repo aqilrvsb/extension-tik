@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.8.1 - License shop validation
+ * v2.9.1 - Added watchdog timer for stalled processing
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -19,11 +19,16 @@ importScripts('lib/xlsx.full.min.js');
 const MAX_RETRIES = 3;
 const NOTIFICATION_ID = 'tiktok-export-complete';
 const DEBUG = false; // Set to true for verbose logging
+const ORDER_TIMEOUT_MS = 30000; // 30 seconds max per order before auto-refresh
 
 // Debug logger
 function debugLog(...args) {
   if (DEBUG) console.log('[Background]', ...args);
 }
+
+// Watchdog timer for detecting stalled processing
+let orderWatchdogTimer = null;
+let orderStartTime = null;
 
 // State
 let state = {
@@ -275,6 +280,9 @@ async function handleStop() {
   state.shouldStop = true;
   state.isRunning = false;
 
+  // Stop watchdog timer
+  stopOrderWatchdog();
+
   // FORCE STOP: Clear session state so it won't auto-resume
   await clearSessionState();
 
@@ -399,6 +407,7 @@ async function processNextOrder() {
 
   if (state.currentOrderIndex >= state.orderIds.length) {
     // All done!
+    stopOrderWatchdog();
     state.isRunning = false;
     state.phase = 'done';
     const retriedMsg = state.retried > 0 ? `, ${state.retried} recovered by retry` : '';
@@ -421,12 +430,16 @@ async function processNextOrder() {
   log(`Processing order ...${orderIdShort} (${state.currentOrderIndex + 1}/${state.orderIds.length}, ${remaining} remaining)`);
   broadcastStatus(`Processing order ${state.currentOrderIndex + 1}/${state.orderIds.length}`, true, false, false, orderId);
 
+  // Start watchdog timer to detect stalled processing
+  startOrderWatchdog(orderId);
+
   // Navigate to order detail page
   const url = `https://seller-my.tiktok.com/order/detail?order_no=${orderId}&shop_region=MY`;
 
   try {
     await chrome.tabs.update(state.currentTabId, { url });
   } catch (error) {
+    stopOrderWatchdog();
     log('Navigation error: ' + error.message, 'error');
     handleOrderFailed(orderId, 'Navigation failed');
   }
@@ -464,6 +477,9 @@ async function processCurrentOrder() {
  * Handle extracted order data from content script
  */
 async function handleOrderDataExtracted(data) {
+  // Stop watchdog - we got a response
+  stopOrderWatchdog();
+
   if (!state.isRunning) return;
 
   const orderId = state.orderIds[state.currentOrderIndex];
@@ -896,6 +912,53 @@ function sleep(ms) {
 }
 
 /**
+ * Start watchdog timer for order processing
+ * If order takes longer than ORDER_TIMEOUT_MS, auto-refresh and retry
+ */
+function startOrderWatchdog(orderId) {
+  // Clear any existing watchdog
+  stopOrderWatchdog();
+
+  orderStartTime = Date.now();
+  const orderIdShort = orderId.slice(-8);
+
+  orderWatchdogTimer = setTimeout(async () => {
+    if (!state.isRunning || state.shouldStop) return;
+
+    const elapsed = Math.round((Date.now() - orderStartTime) / 1000);
+    log(`⚠ Order ...${orderIdShort} stalled (${elapsed}s) - auto-refreshing tab...`, 'warn');
+
+    // Reset processing flag
+    state.isProcessingOrder = false;
+
+    // Refresh the tab to recover
+    try {
+      if (state.currentTabId) {
+        await chrome.tabs.reload(state.currentTabId);
+        log('Tab refreshed, will resume via tab update listener', 'info');
+      }
+    } catch (error) {
+      log('Failed to refresh tab: ' + error.message, 'error');
+      // If tab refresh fails, try to handle as failed order
+      handleOrderFailed(orderId, 'Processing timeout - tab refresh failed');
+    }
+  }, ORDER_TIMEOUT_MS);
+
+  debugLog(`Watchdog started for order ...${orderIdShort} (${ORDER_TIMEOUT_MS}ms timeout)`);
+}
+
+/**
+ * Stop/clear the watchdog timer
+ */
+function stopOrderWatchdog() {
+  if (orderWatchdogTimer) {
+    clearTimeout(orderWatchdogTimer);
+    orderWatchdogTimer = null;
+  }
+  orderStartTime = null;
+}
+
+/**
  * Show desktop notification when export completes
  */
 function showCompletionNotification(success, failed, skipped, retried = 0) {
@@ -919,4 +982,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.8.1');
+console.log('[TikTok Order Exporter] Background service worker started v2.9.1');

@@ -139,8 +139,8 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
   const orderPattern = /5\d{16,18}/g;
 
   try {
-    // Wait for page to fully load (reduced from 3000ms)
-    await sleep(1500);
+    // Wait for page to fully load
+    await sleep(2000);
 
     // Check if we're on the right page
     if (!window.location.href.includes('/order')) {
@@ -156,29 +156,28 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
         debugLog(' Warning: Date filter may not have been applied correctly');
       }
       isFilterActive = true;
-      // Wait for filtered results to load
-      await sleep(2000);
+      // Wait longer for filtered results to load
+      await sleep(3000);
     }
 
     // Get shipped count and validate maxOrders
     const shippedCount = getShippedCount();
-    // When filter is active, we will paginate until no more orders found
-    // So use a high number to not limit collection
-    const actualMax = isFilterActive ? 10000 : Math.min(maxOrders, shippedCount);
+    // When filter is active, use the filtered count to calculate pages
+    const actualMax = isFilterActive ? shippedCount : Math.min(maxOrders, shippedCount);
     debugLog(' Shipped count:', shippedCount, ', Requested:', maxOrders, ', Will collect up to:', actualMax);
     if (isFilterActive) {
-      debugLog(' DATE FILTER ACTIVE - will paginate until no more orders found');
+      debugLog(' DATE FILTER ACTIVE - will collect', shippedCount, 'filtered orders');
     }
 
-    // Scroll to bottom to ensure pagination is loaded (reduced delays)
+    // Scroll to bottom to ensure pagination is loaded
     window.scrollTo(0, document.body.scrollHeight);
-    await sleep(800);
+    await sleep(1000);
     window.scrollTo(0, 0);
-    await sleep(500);
+    await sleep(800);
 
-    // When filter is active, don't limit pages - keep going until no orders found
-    // Max 100 pages as safety limit (2000 orders)
-    const pagesNeeded = isFilterActive ? 100 : Math.ceil(actualMax / 20);
+    // Calculate pages based on filtered count (not unlimited)
+    // Each page has 20 orders
+    const pagesNeeded = Math.min(Math.ceil(actualMax / 20), 100); // Max 100 pages safety
     debugLog(' Will check up to', pagesNeeded, 'pages');
 
     // Collect from page 1
@@ -188,7 +187,7 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
     // If no orders found on page 1, wait more and retry
     if (orderIds.length === 0) {
       debugLog(' No orders on page 1, waiting more...');
-      await sleep(2000);
+      await sleep(3000);
       collectOrdersFromPage(orderIds, orderPattern, actualMax);
       debugLog(' Page 1 retry:', orderIds.length, 'orders');
     }
@@ -198,17 +197,17 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
 
     // Go through more pages
     for (let page = 2; page <= pagesNeeded; page++) {
-      // If not filtering, stop when we have enough
-      if (!isFilterActive && orderIds.length >= actualMax) {
-        debugLog(' Reached max orders, stopping');
+      // Stop when we have all orders
+      if (orderIds.length >= actualMax) {
+        debugLog(' Collected all', actualMax, 'orders, stopping');
         break;
       }
 
       debugLog(' --- Attempting page', page, '---');
 
-      // Scroll to pagination (reduced delay)
+      // Scroll to pagination
       window.scrollTo(0, document.body.scrollHeight);
-      await sleep(300);
+      await sleep(500);
 
       // Click the page number using aria-label
       const clicked = await clickPage(page);
@@ -217,13 +216,13 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
         break;
       }
 
-      // Wait for page to load new content
+      // Wait for page to load new content - LONGER WAIT for proper loading
       debugLog(' Waiting for page', page, 'to load...');
-      await sleep(1200);
+      await sleep(isFilterActive ? 2500 : 1800);
 
-      // Scroll back up to see orders (reduced delay)
+      // Scroll back up to see orders
       window.scrollTo(0, 0);
-      await sleep(400);
+      await sleep(600);
 
       // Collect orders from this page
       const before = orderIds.length;
