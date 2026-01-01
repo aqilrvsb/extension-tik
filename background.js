@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.8.0 - Date range filter
+ * v2.8.1 - License shop validation
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -919,4 +919,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.8.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.8.1');

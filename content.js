@@ -49,12 +49,21 @@ let isCollecting = false;
 let lastCollectionTime = 0;
 
 /**
- * Get total shipped count from page
- * Looks for: <div>Shipped</div><div style="...">1,261</div>
- * Or: "Found 1261 orders"
+ * Get total order count from page (considers filters)
+ * When date filter is active, looks for "Found X orders" first
+ * Otherwise looks for Shipped tab count
  */
 function getShippedCount() {
-  // Method 1: Find the Shipped tab with adjacent count div
+  // PRIORITY 1: "Found X orders" text - this shows FILTERED count
+  // When filter is applied, TikTok shows "Found 36 orders" etc
+  const foundText = document.body.innerText.match(/Found\s+([\d,]+)\s+orders/i);
+  if (foundText) {
+    const count = parseInt(foundText[1].replace(/,/g, ''));
+    debugLog(' Found FILTERED count from "Found X orders":', count);
+    return count;
+  }
+
+  // PRIORITY 2: Find the Shipped tab with adjacent count div (unfiltered total)
   // Structure: <div>Shipped</div><div style="margin-left: 2px;...">1,261</div>
   const shippedDivs = document.querySelectorAll('div');
   for (const div of shippedDivs) {
@@ -72,7 +81,7 @@ function getShippedCount() {
     }
   }
 
-  // Method 2: Find by data attribute
+  // PRIORITY 3: Find by data attribute
   const shippedTab = document.querySelector('[data-log_click_for="shipped"]');
   if (shippedTab) {
     const countMatch = shippedTab.textContent?.match(/([\d,]+)/);
@@ -83,15 +92,7 @@ function getShippedCount() {
     }
   }
 
-  // Method 3: Try to find "Found X orders" text
-  const foundText = document.body.innerText.match(/Found\s+([\d,]+)\s+orders/i);
-  if (foundText) {
-    const count = parseInt(foundText[1].replace(/,/g, ''));
-    debugLog(' Found shipped count from "Found X orders":', count);
-    return count;
-  }
-
-  // Method 4: Regex for "Shipped" followed by number
+  // PRIORITY 4: Regex for "Shipped" followed by number
   const shippedMatch = document.body.innerText.match(/Shipped\s*([\d,]+)/i);
   if (shippedMatch) {
     const count = parseInt(shippedMatch[1].replace(/,/g, ''));
@@ -148,19 +149,26 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
     }
 
     // Apply date filter if provided
+    let isFilterActive = false;
     if (dateFilter) {
       const filterApplied = await applyDateFilter(dateFilter);
       if (!filterApplied) {
         debugLog(' Warning: Date filter may not have been applied correctly');
       }
+      isFilterActive = true;
       // Wait for filtered results to load
       await sleep(2000);
     }
 
     // Get shipped count and validate maxOrders
     const shippedCount = getShippedCount();
-    const actualMax = Math.min(maxOrders, shippedCount);
-    debugLog(' Shipped count:', shippedCount, ', Requested:', maxOrders, ', Will collect:', actualMax);
+    // When filter is active, we will paginate until no more orders found
+    // So use a high number to not limit collection
+    const actualMax = isFilterActive ? 10000 : Math.min(maxOrders, shippedCount);
+    debugLog(' Shipped count:', shippedCount, ', Requested:', maxOrders, ', Will collect up to:', actualMax);
+    if (isFilterActive) {
+      debugLog(' DATE FILTER ACTIVE - will paginate until no more orders found');
+    }
 
     // Scroll to bottom to ensure pagination is loaded (reduced delays)
     window.scrollTo(0, document.body.scrollHeight);
@@ -168,9 +176,10 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
     window.scrollTo(0, 0);
     await sleep(500);
 
-    // Calculate pages needed (20 orders per page)
-    const pagesNeeded = Math.ceil(actualMax / 20);
-    debugLog(' Need', pagesNeeded, 'pages for', actualMax, 'orders');
+    // When filter is active, don't limit pages - keep going until no orders found
+    // Max 100 pages as safety limit (2000 orders)
+    const pagesNeeded = isFilterActive ? 100 : Math.ceil(actualMax / 20);
+    debugLog(' Will check up to', pagesNeeded, 'pages');
 
     // Collect from page 1
     collectOrdersFromPage(orderIds, orderPattern, actualMax);
@@ -184,8 +193,17 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
       debugLog(' Page 1 retry:', orderIds.length, 'orders');
     }
 
-    // Go through more pages if needed (FAST pagination - no API calls, just DOM reads)
-    for (let page = 2; page <= pagesNeeded && orderIds.length < actualMax; page++) {
+    // Track consecutive empty pages (to stop when filter shows no more results)
+    let consecutiveEmptyPages = 0;
+
+    // Go through more pages
+    for (let page = 2; page <= pagesNeeded; page++) {
+      // If not filtering, stop when we have enough
+      if (!isFilterActive && orderIds.length >= actualMax) {
+        debugLog(' Reached max orders, stopping');
+        break;
+      }
+
       debugLog(' --- Attempting page', page, '---');
 
       // Scroll to pagination (reduced delay)
@@ -199,7 +217,7 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
         break;
       }
 
-      // Wait for page to load new content (reduced from 3000ms - pagination is just DOM update)
+      // Wait for page to load new content
       debugLog(' Waiting for page', page, 'to load...');
       await sleep(1200);
 
@@ -213,10 +231,17 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
       const newCount = orderIds.length - before;
       debugLog(' Page', page, ':', newCount, 'new orders, total:', orderIds.length);
 
-      // Stop if no new orders found
+      // Track empty pages
       if (newCount === 0) {
-        debugLog(' No new orders on page', page, '- stopping');
-        break;
+        consecutiveEmptyPages++;
+        debugLog(' Empty page count:', consecutiveEmptyPages);
+        // Stop after 2 consecutive empty pages (handles filter edge cases)
+        if (consecutiveEmptyPages >= 2) {
+          debugLog(' 2 consecutive empty pages - all orders collected');
+          break;
+        }
+      } else {
+        consecutiveEmptyPages = 0;
       }
     }
 

@@ -1,6 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.8.0 - Date range filter
+ * v2.8.1 - License shop validation
  */
 
 const DEBUG = false; // Set to true for verbose logging
@@ -90,21 +90,31 @@ async function getCurrentShopCode() {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // Method 1: Look for Shop Code text
+            // Method 1: Look for "Shop Code: XXXXX" in any element (exact match)
+            const allDivs = document.querySelectorAll('div');
+            for (const div of allDivs) {
+              const text = div.textContent?.trim();
+              if (text && text.startsWith('Shop Code:')) {
+                const code = text.replace('Shop Code:', '').trim();
+                if (code && code.length >= 8) return code;
+              }
+            }
+
+            // Method 2: Look for Shop Code text using regex
             const shopCodeMatch = document.body.innerText.match(/Shop Code:\s*([A-Z0-9]+)/i);
             if (shopCodeMatch) return shopCodeMatch[1];
 
-            // Method 2: Look in URL params
+            // Method 3: Look in URL params
             const urlMatch = window.location.href.match(/shop_code=([A-Z0-9]+)/i);
             if (urlMatch) return urlMatch[1];
 
-            // Method 3: Look for data attribute or specific element
+            // Method 4: Look for data attribute or specific element
             const shopElement = document.querySelector('[data-shop-code]');
             if (shopElement) return shopElement.getAttribute('data-shop-code');
 
-            // Method 4: Look in page HTML for MYLCV0LW98 pattern (TikTok shop codes)
+            // Method 5: Look in page HTML for MY shop code pattern
             const pageHtml = document.body.innerHTML;
-            const codePattern = pageHtml.match(/MY[A-Z0-9]{8,}/);
+            const codePattern = pageHtml.match(/MY[A-Z0-9]{8,10}/);
             if (codePattern) return codePattern[0];
 
             return null;
@@ -256,26 +266,29 @@ function hideLicenseModal() {
  * Returns true if license is valid, false otherwise
  */
 async function checkLicenseBeforeStart() {
-  // First check cached license
+  // Get current shop code FIRST - this is REQUIRED
+  const currentShopCode = await getCurrentShopCode();
+
+  if (!currentShopCode) {
+    // Must be on TikTok Seller Center page to detect shop code
+    addLog('Please open TikTok Seller Center first', 'error');
+    return false;
+  }
+
+  debugLog('[License] Current shop code:', currentShopCode);
+
+  // Check cached license
   const cachedLicense = await checkCachedLicense();
 
   if (cachedLicense) {
-    // Get current shop code to verify
-    const currentShopCode = await getCurrentShopCode();
-
-    // If we can't get shop code, allow with warning
-    if (!currentShopCode) {
-      debugLog('[License] Could not detect shop code, using cached license');
-      return true;
-    }
-
     // Verify shop code matches
     if (cachedLicense.shopCode === currentShopCode) {
       debugLog('[License] Using cached license for shop:', currentShopCode);
       return true;
     } else {
-      // Shop code mismatch, need new license
-      debugLog('[License] Shop code mismatch, need new license');
+      // Shop code mismatch - license is for different shop
+      debugLog('[License] Shop code mismatch:', cachedLicense.shopCode, 'vs', currentShopCode);
+      addLog(`License is for shop ${cachedLicense.shopCode}, not ${currentShopCode}`, 'error');
       showLicenseModal();
       return false;
     }
