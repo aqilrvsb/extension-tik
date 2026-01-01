@@ -183,48 +183,6 @@ async function validateShopCode(shopCode) {
 }
 
 /**
- * Check if we have a valid cached license
- */
-async function checkCachedLicense() {
-  const storage = await chrome.storage.local.get(['licenseData']);
-  const licenseData = storage.licenseData;
-
-  if (!licenseData) return null;
-
-  // Check if cache is still valid (24 hours)
-  const cacheTime = new Date(licenseData.cachedAt);
-  const now = new Date();
-  const hoursSinceCached = (now - cacheTime) / (1000 * 60 * 60);
-
-  if (hoursSinceCached > 24) {
-    // Cache expired, need to revalidate
-    return null;
-  }
-
-  // Check if license itself is still valid
-  const validUntil = new Date(licenseData.validUntil);
-  if (now > validUntil) {
-    return null;
-  }
-
-  return licenseData;
-}
-
-/**
- * Save license to cache
- */
-async function cacheLicense(licenseKey, validUntil, shopCode) {
-  await chrome.storage.local.set({
-    licenseData: {
-      licenseKey: licenseKey,
-      validUntil: validUntil,
-      shopCode: shopCode,
-      cachedAt: new Date().toISOString()
-    }
-  });
-}
-
-/**
  * Check license before starting export
  * Now validates by shop code directly - no license key input needed
  * Returns true if license is valid, false otherwise
@@ -243,21 +201,11 @@ async function checkLicenseBeforeStart() {
   debugLog('[License] Current shop code:', currentShopCode);
   addLog(`Validating shop: ${currentShopCode}...`, 'info');
 
-  // Check cached license first
-  const cachedLicense = await checkCachedLicense();
-
-  if (cachedLicense && cachedLicense.shopCode === currentShopCode) {
-    debugLog('[License] Using cached license for shop:', currentShopCode);
-    addLog(`License valid! ${Math.ceil((new Date(cachedLicense.validUntil) - new Date()) / (1000 * 60 * 60 * 24))} days remaining`, 'success');
-    return true;
-  }
-
-  // Validate shop code against Supabase
+  // ALWAYS validate fresh from Supabase on every export start
+  // No caching - verify every time to ensure license is still valid
   const result = await validateShopCode(currentShopCode);
 
   if (result.valid) {
-    // Cache the license for this shop
-    await cacheLicense(result.license.license_key, result.license.valid_until, currentShopCode);
     addLog(`License valid! ${result.daysRemaining} days remaining`, 'success');
     return true;
   } else {
