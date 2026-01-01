@@ -3,6 +3,11 @@
  * Displays exported orders in a DataTable with live refresh
  */
 
+const DEBUG = false;
+function debugLog(...args) {
+  if (DEBUG) console.log('[Dashboard]', ...args);
+}
+
 let dataTable = null;
 let autoRefreshInterval = null;
 let orders = [];
@@ -10,6 +15,8 @@ let orders = [];
 // Initialize when DOM is ready
 document.addEventListener('DOMContentLoaded', function() {
   loadOrders();
+  loadExportHistory();
+  initDarkMode();
 
   // Auto-refresh toggle
   document.getElementById('autoRefresh').addEventListener('change', function() {
@@ -24,9 +31,54 @@ document.addEventListener('DOMContentLoaded', function() {
   document.getElementById('refreshBtn').addEventListener('click', refreshData);
   document.getElementById('clearBtn').addEventListener('click', clearAllData);
   document.getElementById('debugBtn').addEventListener('click', debugStorage);
+  document.getElementById('refreshHistoryBtn').addEventListener('click', loadExportHistory);
+  document.getElementById('darkModeToggle').addEventListener('click', toggleDarkMode);
 
   startAutoRefresh();
 });
+
+// Initialize dark mode from stored preference
+function initDarkMode() {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['darkMode'], function(result) {
+        if (result.darkMode) {
+          document.body.classList.add('dark-mode');
+          document.getElementById('darkModeIcon').textContent = '☀️';
+        }
+      });
+    } else {
+      // Fallback to localStorage for non-extension contexts
+      var isDark = localStorage.getItem('darkMode') === 'true';
+      if (isDark) {
+        document.body.classList.add('dark-mode');
+        document.getElementById('darkModeIcon').textContent = '☀️';
+      }
+    }
+  } catch (error) {
+    debugLog('Error initializing dark mode:', error);
+  }
+}
+
+// Toggle dark mode
+function toggleDarkMode() {
+  var body = document.body;
+  var icon = document.getElementById('darkModeIcon');
+  var isDark = body.classList.toggle('dark-mode');
+
+  icon.textContent = isDark ? '☀️' : '🌙';
+
+  // Save preference
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.set({ darkMode: isDark });
+    } else {
+      localStorage.setItem('darkMode', isDark.toString());
+    }
+  } catch (error) {
+    debugLog('Error saving dark mode preference:', error);
+  }
+}
 
 // Start auto-refresh
 function startAutoRefresh() {
@@ -44,16 +96,16 @@ function stopAutoRefresh() {
 
 // Load orders from Chrome storage
 function loadOrders() {
-  console.log('[Dashboard] Loading orders...');
+  debugLog('Loading orders...');
 
   try {
     // Check if we're in a Chrome extension context
     if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
-      console.log('[Dashboard] Chrome storage available');
+      debugLog('Chrome storage available');
 
       // Use callback style for chrome.storage.local.get
       chrome.storage.local.get(['exportedOrders'], function(result) {
-        console.log('[Dashboard] Raw storage result:', JSON.stringify(result));
+        debugLog('Raw storage result:', JSON.stringify(result));
 
         if (chrome.runtime.lastError) {
           console.error('[Dashboard] Storage error:', chrome.runtime.lastError.message);
@@ -62,17 +114,14 @@ function loadOrders() {
         }
 
         orders = result.exportedOrders || [];
-        console.log('[Dashboard] Loaded', orders.length, 'orders');
-        console.log('[Dashboard] First order sample:', orders[0]);
+        debugLog('Loaded', orders.length, 'orders');
 
         updateStats();
         renderTable();
         document.getElementById('lastUpdated').textContent = new Date().toLocaleTimeString();
       });
     } else {
-      console.log('[Dashboard] Chrome storage NOT available');
-      console.log('[Dashboard] chrome:', typeof chrome);
-      console.log('[Dashboard] chrome.storage:', typeof chrome !== 'undefined' ? chrome.storage : 'N/A');
+      debugLog('Chrome storage NOT available');
 
       // Show error message
       showError('Chrome storage not available. Make sure you opened this page from the extension.');
@@ -241,7 +290,7 @@ function clearAllData() {
 
 // Debug storage - show all keys and values
 function debugStorage() {
-  console.log('[Dashboard] === DEBUG STORAGE ===');
+  debugLog('=== DEBUG STORAGE ===');
 
   if (typeof chrome === 'undefined') {
     alert('Chrome API not available');
@@ -260,14 +309,13 @@ function debugStorage() {
 
   // Get ALL storage data
   chrome.storage.local.get(null, function(items) {
-    console.log('[Dashboard] ALL storage items:', items);
-    console.log('[Dashboard] Storage keys:', Object.keys(items));
+    debugLog('ALL storage items:', items);
+    debugLog('Storage keys:', Object.keys(items));
 
     if (items.exportedOrders) {
-      console.log('[Dashboard] exportedOrders count:', items.exportedOrders.length);
-      console.log('[Dashboard] exportedOrders data:', items.exportedOrders);
+      debugLog('exportedOrders count:', items.exportedOrders.length);
     } else {
-      console.log('[Dashboard] exportedOrders is EMPTY or UNDEFINED');
+      debugLog('exportedOrders is EMPTY or UNDEFINED');
     }
 
     // Show alert with summary
@@ -275,4 +323,79 @@ function debugStorage() {
     var orderCount = items.exportedOrders ? items.exportedOrders.length : 0;
     alert('Storage Keys: ' + keys.join(', ') + '\n\nExported Orders: ' + orderCount + '\n\nCheck console (F12) for full data.');
   });
+}
+
+// Load export history
+function loadExportHistory() {
+  debugLog('Loading export history...');
+
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.get(['exportHistory'], function(result) {
+        if (chrome.runtime.lastError) {
+          console.error('[Dashboard] Error loading history:', chrome.runtime.lastError.message);
+          return;
+        }
+
+        var history = result.exportHistory || [];
+        debugLog('Loaded', history.length, 'history entries');
+        renderExportHistory(history);
+      });
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error loading export history:', error);
+  }
+}
+
+// Render export history table
+function renderExportHistory(history) {
+  var emptyHistoryState = document.getElementById('emptyHistoryState');
+  var historyTable = document.getElementById('historyTable');
+  var historyBody = document.getElementById('historyBody');
+
+  if (!history || history.length === 0) {
+    emptyHistoryState.style.display = 'block';
+    historyTable.style.display = 'none';
+    return;
+  }
+
+  emptyHistoryState.style.display = 'none';
+  historyTable.style.display = 'table';
+
+  // Build table rows
+  var html = '';
+  history.forEach(function(entry) {
+    var date = new Date(entry.exportedAt);
+    var formattedDate = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    var formatBadge = entry.format === 'xlsx'
+      ? '<span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">XLSX</span>'
+      : '<span style="background: #17a2b8; color: white; padding: 2px 8px; border-radius: 4px; font-size: 11px;">CSV</span>';
+
+    html += '<tr>';
+    html += '<td>' + formattedDate + '</td>';
+    html += '<td>' + formatBadge + '</td>';
+    html += '<td>' + entry.count + ' orders</td>';
+    html += '<td style="font-size: 12px; color: #666;">' + (entry.filename || '-') + '</td>';
+    html += '</tr>';
+  });
+
+  historyBody.innerHTML = html;
+}
+
+// Clear export history
+function clearExportHistory() {
+  if (!confirm('Are you sure you want to clear export history?')) {
+    return;
+  }
+
+  try {
+    if (typeof chrome !== 'undefined' && chrome.storage && chrome.storage.local) {
+      chrome.storage.local.remove(['exportHistory'], function() {
+        loadExportHistory();
+        alert('Export history cleared!');
+      });
+    }
+  } catch (error) {
+    console.error('[Dashboard] Error clearing history:', error);
+  }
 }

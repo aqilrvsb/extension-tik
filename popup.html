@@ -520,6 +520,97 @@
     .modal-actions .btn {
       flex: 1;
     }
+
+    /* Date Filter Styles */
+    .date-filter-section {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px dashed #ddd;
+    }
+
+    .toggle-switch {
+      position: relative;
+      display: inline-block;
+      width: 40px;
+      height: 22px;
+    }
+
+    .toggle-switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .toggle-slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 22px;
+    }
+
+    .toggle-slider:before {
+      position: absolute;
+      content: "";
+      height: 16px;
+      width: 16px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+
+    .toggle-switch input:checked + .toggle-slider {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    }
+
+    .toggle-switch input:checked + .toggle-slider:before {
+      transform: translateX(18px);
+    }
+
+    .date-range-inputs {
+      margin-top: 10px;
+      padding: 10px;
+      background: #f8f9fa;
+      border-radius: 8px;
+    }
+
+    .date-input-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .date-input-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .date-input-row label {
+      font-size: 12px;
+      color: #666;
+      width: 40px;
+    }
+
+    .date-input {
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      font-size: 13px;
+      color: #333;
+    }
+
+    .date-input:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+    }
   </style>
 </head>
 <body>
@@ -624,6 +715,26 @@
             <input type="number" class="setting-input" id="delayMax" value="6" min="1" max="30" step="0.5">
           </div>
         </div>
+        <!-- Date Range Filter (Optional) -->
+        <div class="date-filter-section">
+          <div class="setting-row">
+            <span class="setting-label">📅 Date Filter (Optional):</span>
+            <label class="toggle-switch">
+              <input type="checkbox" id="enableDateFilter">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="date-range-inputs" id="dateRangeInputs" style="display: none;">
+            <div class="date-input-row">
+              <label>From:</label>
+              <input type="date" class="date-input" id="filterStartDate">
+            </div>
+            <div class="date-input-row">
+              <label>To:</label>
+              <input type="date" class="date-input" id="filterEndDate">
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Storage Info -->
@@ -639,7 +750,7 @@
     </div>
 
     <div class="footer">
-      v2.6.0 - Notifications
+      v2.8.0 - Date Filter
     </div>
   </div>
 

@@ -1,11 +1,11 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.6.0 - Desktop notifications & sound effects
+ * v2.8.0 - Date range filter
  */
 
 const DEBUG = false; // Set to true for verbose logging
 function debugLog(...args) {
-  if (DEBUG) debugLog('', ...args);
+  if (DEBUG) console.log('[Popup]', ...args);
 }
 
 // Supabase config for license validation
@@ -44,6 +44,12 @@ const settingsSection = document.getElementById('settingsSection');
 const storageCount = document.getElementById('storageCount');
 const clearStorageBtn = document.getElementById('clearStorageBtn');
 const openDashboardBtn = document.getElementById('openDashboardBtn');
+
+// Date filter elements
+const enableDateFilter = document.getElementById('enableDateFilter');
+const dateRangeInputs = document.getElementById('dateRangeInputs');
+const filterStartDate = document.getElementById('filterStartDate');
+const filterEndDate = document.getElementById('filterEndDate');
 
 // License modal elements
 const licenseModal = document.getElementById('licenseModal');
@@ -357,10 +363,28 @@ licenseInput.addEventListener('input', (e) => {
 // Initialize on popup open
 async function init() {
   // Load saved settings
-  const settings = await chrome.storage.local.get(['maxOrders', 'delayMin', 'delayMax']);
+  const settings = await chrome.storage.local.get(['maxOrders', 'delayMin', 'delayMax', 'enableDateFilter', 'filterStartDate', 'filterEndDate']);
   if (settings.maxOrders) maxOrdersInput.value = settings.maxOrders;
   if (settings.delayMin) delayMinInput.value = settings.delayMin;
   if (settings.delayMax) delayMaxInput.value = settings.delayMax;
+
+  // Load date filter settings
+  if (settings.enableDateFilter) {
+    enableDateFilter.checked = true;
+    dateRangeInputs.style.display = 'block';
+  }
+  if (settings.filterStartDate) filterStartDate.value = settings.filterStartDate;
+  if (settings.filterEndDate) filterEndDate.value = settings.filterEndDate;
+
+  // Set default dates if not set (last 30 days)
+  if (!filterStartDate.value) {
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    filterStartDate.value = thirtyDaysAgo.toISOString().split('T')[0];
+  }
+  if (!filterEndDate.value) {
+    filterEndDate.value = new Date().toISOString().split('T')[0];
+  }
 
   // Load storage count
   await updateStorageCount();
@@ -461,6 +485,22 @@ delayMaxInput.addEventListener('change', () => {
   chrome.storage.local.set({ delayMin: min, delayMax: max });
 });
 
+// Date filter toggle
+enableDateFilter.addEventListener('change', () => {
+  const enabled = enableDateFilter.checked;
+  dateRangeInputs.style.display = enabled ? 'block' : 'none';
+  chrome.storage.local.set({ enableDateFilter: enabled });
+});
+
+// Date filter inputs
+filterStartDate.addEventListener('change', () => {
+  chrome.storage.local.set({ filterStartDate: filterStartDate.value });
+});
+
+filterEndDate.addEventListener('change', () => {
+  chrome.storage.local.set({ filterEndDate: filterEndDate.value });
+});
+
 // Sound effects using Web Audio API
 function playSound(type) {
   if (type === 'success') {
@@ -535,13 +575,25 @@ function startExport() {
   const delayMin = parseFloat(delayMinInput.value) || 2;
   const delayMax = parseFloat(delayMaxInput.value) || 6;
 
-  // Send start command to background
-  chrome.runtime.sendMessage({
+  // Build message with optional date filter
+  const message = {
     type: 'START_EXPORT',
     maxOrders,
     delayMinMs: delayMin * 1000,
     delayMaxMs: delayMax * 1000
-  }, (response) => {
+  };
+
+  // Add date filter if enabled
+  if (enableDateFilter.checked && filterStartDate.value && filterEndDate.value) {
+    message.dateFilter = {
+      startDate: filterStartDate.value, // Format: YYYY-MM-DD
+      endDate: filterEndDate.value
+    };
+    addLog(`Date filter: ${filterStartDate.value} to ${filterEndDate.value}`, 'info');
+  }
+
+  // Send start command to background
+  chrome.runtime.sendMessage(message, (response) => {
     if (response && response.success) {
       setRunningState(true);
       addLog('Export started...', 'info');

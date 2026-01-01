@@ -311,6 +311,170 @@
       table-layout: fixed;
     }
 
+    /* History table */
+    #historyTable {
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+
+    #historyTable th {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 12px 15px;
+      text-align: left;
+      font-weight: 600;
+    }
+
+    #historyTable td {
+      padding: 10px 15px;
+      border-bottom: 1px solid #eee;
+    }
+
+    #historyTable tbody tr:hover {
+      background-color: #f8f9ff;
+    }
+
+    /* Dark Mode Toggle Button */
+    .dark-mode-toggle {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: white;
+      border: none;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+      cursor: pointer;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      z-index: 1000;
+    }
+
+    .dark-mode-toggle:hover {
+      transform: scale(1.1);
+    }
+
+    /* Dark Mode Styles */
+    body.dark-mode {
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    }
+
+    body.dark-mode .card {
+      background: #1e1e2f;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+
+    body.dark-mode .stat-card {
+      background: #1e1e2f;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+    }
+
+    body.dark-mode .stat-card .label {
+      color: #aaa;
+    }
+
+    body.dark-mode .card-title {
+      color: #e0e0e0;
+    }
+
+    body.dark-mode .card-header {
+      border-bottom-color: #333;
+    }
+
+    body.dark-mode .auto-refresh label {
+      color: #ccc;
+    }
+
+    body.dark-mode .btn-secondary {
+      background: #444;
+    }
+
+    body.dark-mode .btn-secondary:hover {
+      background: #555;
+    }
+
+    body.dark-mode table.dataTable thead th {
+      background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+    }
+
+    body.dark-mode table.dataTable tbody td {
+      color: #e0e0e0;
+      border-bottom-color: #333;
+    }
+
+    body.dark-mode table.dataTable tbody tr:hover {
+      background-color: #2a2a3e;
+    }
+
+    body.dark-mode .dataTables_filter input {
+      background: #2a2a3e;
+      border-color: #444;
+      color: #e0e0e0;
+    }
+
+    body.dark-mode .dataTables_length select {
+      background: #2a2a3e;
+      border-color: #444;
+      color: #e0e0e0;
+    }
+
+    body.dark-mode .dataTables_info {
+      color: #aaa;
+    }
+
+    body.dark-mode .dataTables_paginate .paginate_button {
+      background: #2a2a3e !important;
+      border-color: #444 !important;
+      color: #e0e0e0 !important;
+    }
+
+    body.dark-mode .dataTables_paginate .paginate_button:hover {
+      background: #3a3a4e !important;
+    }
+
+    body.dark-mode .last-updated {
+      color: #777;
+    }
+
+    body.dark-mode .empty-state {
+      color: #aaa;
+    }
+
+    body.dark-mode .empty-state h3 {
+      color: #ccc;
+    }
+
+    body.dark-mode #historyTable th {
+      background: linear-gradient(135deg, #4a5568 0%, #2d3748 100%);
+    }
+
+    body.dark-mode #historyTable td {
+      color: #e0e0e0;
+      border-bottom-color: #333;
+    }
+
+    body.dark-mode #historyTable tbody tr:hover {
+      background-color: #2a2a3e;
+    }
+
+    body.dark-mode .dark-mode-toggle {
+      background: #2a2a3e;
+      color: #ffd700;
+    }
+
+    body.dark-mode .loading {
+      color: #aaa;
+    }
+
+    body.dark-mode .loading-spinner {
+      border-color: #333;
+      border-top-color: #667eea;
+    }
+
     /* Responsive */
     @media (max-width: 768px) {
       .stats-row {
@@ -330,6 +494,11 @@
   </style>
 </head>
 <body>
+  <!-- Dark Mode Toggle -->
+  <button class="dark-mode-toggle" id="darkModeToggle" title="Toggle Dark Mode">
+    <span id="darkModeIcon">🌙</span>
+  </button>
+
   <div class="container">
     <div class="header">
       <h1>TikTok Orders Dashboard</h1>
@@ -403,6 +572,32 @@
 
       <div class="last-updated">
         Last updated: <span id="lastUpdated">-</span>
+      </div>
+    </div>
+
+    <!-- Export History Card -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-title">📋 Export History</div>
+        <button class="btn btn-secondary" id="refreshHistoryBtn">Refresh</button>
+      </div>
+      <div id="historyContainer">
+        <div class="empty-state" id="emptyHistoryState">
+          <div class="icon">📂</div>
+          <h3>No Export History</h3>
+          <p>Your export history will appear here after you download orders.</p>
+        </div>
+        <table id="historyTable" style="display: none; width: 100%;">
+          <thead>
+            <tr>
+              <th style="width: 180px;">Date/Time</th>
+              <th style="width: 80px;">Format</th>
+              <th style="width: 100px;">Orders</th>
+              <th>Filename</th>
+            </tr>
+          </thead>
+          <tbody id="historyBody"></tbody>
+        </table>
       </div>
     </div>
   </div>

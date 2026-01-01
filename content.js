@@ -9,7 +9,7 @@
 
 const DEBUG = false; // Set to true for verbose logging
 function debugLog(...args) {
-  if (DEBUG) debugLog('', ...args);
+  if (DEBUG) console.log('[Content]', ...args);
 }
 
 // Listen for messages from background
@@ -18,7 +18,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   switch (message.type) {
     case 'COLLECT_ORDER_IDS':
-      collectOrderIds(message.maxOrders).then(orderIds => {
+      collectOrderIds(message.maxOrders, message.dateFilter).then(orderIds => {
         // Only send if we actually collected (not skipped)
         if (orderIds !== null) {
           chrome.runtime.sendMessage({
@@ -106,8 +106,10 @@ function getShippedCount() {
 /**
  * Collect order IDs from the shipped orders list page
  * With pagination - 20 orders per page, clicks through pages
+ * @param {number} maxOrders - Maximum orders to collect
+ * @param {Object} dateFilter - Optional date filter { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
  */
-async function collectOrderIds(maxOrders = 100) {
+async function collectOrderIds(maxOrders = 100, dateFilter = null) {
   const now = Date.now();
 
   // Prevent multiple simultaneous calls (with 5 second cooldown)
@@ -127,6 +129,9 @@ async function collectOrderIds(maxOrders = 100) {
 
   debugLog(' ========================================');
   debugLog(' Starting order collection, max:', maxOrders);
+  if (dateFilter) {
+    debugLog(' Date filter:', dateFilter.startDate, 'to', dateFilter.endDate);
+  }
   debugLog(' ========================================');
 
   const orderIds = [];
@@ -140,6 +145,16 @@ async function collectOrderIds(maxOrders = 100) {
     if (!window.location.href.includes('/order')) {
       debugLog(' Not on order page, skipping');
       return [];
+    }
+
+    // Apply date filter if provided
+    if (dateFilter) {
+      const filterApplied = await applyDateFilter(dateFilter);
+      if (!filterApplied) {
+        debugLog(' Warning: Date filter may not have been applied correctly');
+      }
+      // Wait for filtered results to load
+      await sleep(2000);
     }
 
     // Get shipped count and validate maxOrders
@@ -277,6 +292,139 @@ async function clickPage(pageNum) {
 
   debugLog(' Could not find page', pageNum, 'button');
   return false;
+}
+
+/**
+ * Apply date filter by clicking Filter button and setting date range
+ * @param {Object} dateFilter - { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
+ * @returns {boolean} - true if filter was applied successfully
+ */
+async function applyDateFilter(dateFilter) {
+  debugLog(' Applying date filter:', dateFilter.startDate, 'to', dateFilter.endDate);
+
+  try {
+    // Step 1: Click the Filter button
+    const filterButton = document.querySelector('[data-log_click_for="filter_button"]');
+    if (!filterButton) {
+      debugLog(' Filter button not found');
+      return false;
+    }
+
+    debugLog(' Clicking Filter button...');
+    filterButton.click();
+    await sleep(1000); // Wait for filter panel to open
+
+    // Step 2: Find the date picker inputs
+    // Look for the date range picker with placeholder "From" and "To"
+    const datePickerContainer = document.querySelector('.core-picker-range, [data-tid="m4b_date_picker_range_picker"]');
+    if (!datePickerContainer) {
+      debugLog(' Date picker container not found');
+      return false;
+    }
+
+    // Step 3: Click on the "From" input to open the date picker
+    const fromInput = datePickerContainer.querySelector('input[placeholder="From"]');
+    const toInput = datePickerContainer.querySelector('input[placeholder="To"]');
+
+    if (!fromInput || !toInput) {
+      debugLog(' Date inputs not found');
+      return false;
+    }
+
+    // Step 4: Clear existing dates by clicking the clear button if visible
+    const clearButton = datePickerContainer.querySelector('.core-picker-clear-icon');
+    if (clearButton) {
+      debugLog(' Clearing existing date filter...');
+      clearButton.click();
+      await sleep(500);
+    }
+
+    // Step 5: Click on the From input to focus it
+    debugLog(' Clicking From input...');
+    fromInput.click();
+    await sleep(500);
+
+    // Step 6: Set the start date
+    // Format: DD/MM/YYYY (TikTok uses this format in MY region)
+    const startDate = formatDateForInput(dateFilter.startDate);
+    debugLog(' Setting start date:', startDate);
+
+    // Try to set value directly and trigger events
+    await setDateInputValue(fromInput, startDate);
+    await sleep(500);
+
+    // Step 7: Click on the To input
+    debugLog(' Clicking To input...');
+    toInput.click();
+    await sleep(500);
+
+    // Step 8: Set the end date
+    const endDate = formatDateForInput(dateFilter.endDate);
+    debugLog(' Setting end date:', endDate);
+
+    await setDateInputValue(toInput, endDate);
+    await sleep(500);
+
+    // Step 9: Click outside to close picker (optional)
+    document.body.click();
+    await sleep(300);
+
+    // Step 10: Find and click the Apply button
+    const applyButton = document.querySelector('[data-log_click_for="apply"]');
+    if (applyButton) {
+      debugLog(' Clicking Apply button...');
+      applyButton.click();
+      await sleep(2000); // Wait for filter to be applied
+      debugLog(' Date filter applied successfully');
+      return true;
+    } else {
+      debugLog(' Apply button not found');
+      return false;
+    }
+
+  } catch (error) {
+    debugLog(' Error applying date filter:', error);
+    return false;
+  }
+}
+
+/**
+ * Format date from YYYY-MM-DD to DD/MM/YYYY
+ * @param {string} dateStr - Date in YYYY-MM-DD format
+ * @returns {string} - Date in DD/MM/YYYY format
+ */
+function formatDateForInput(dateStr) {
+  const [year, month, day] = dateStr.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+/**
+ * Set date input value using various methods
+ * @param {HTMLInputElement} input - The input element
+ * @param {string} value - The date value to set
+ */
+async function setDateInputValue(input, value) {
+  // Method 1: Try direct value assignment with React synthetic event
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  nativeInputValueSetter.call(input, value);
+
+  // Dispatch input event
+  const inputEvent = new Event('input', { bubbles: true });
+  input.dispatchEvent(inputEvent);
+
+  // Dispatch change event
+  const changeEvent = new Event('change', { bubbles: true });
+  input.dispatchEvent(changeEvent);
+
+  // Also try keyboard events to simulate typing
+  input.focus();
+  await sleep(100);
+
+  // Clear and type
+  input.select();
+  document.execCommand('insertText', false, value);
+
+  await sleep(200);
 }
 
 

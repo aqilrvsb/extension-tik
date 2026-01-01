@@ -1,6 +1,6 @@
 /**
  * Background Service Worker for TikTok Order Exporter
- * v2.6.0 - Desktop notifications & sound effects
+ * v2.8.0 - Date range filter
  *
  * Flow:
  * 1. Open TikTok Seller Center → Shipped tab
@@ -45,7 +45,8 @@ let state = {
   isProcessingOrder: false,
   phase: 'idle', // idle, collecting, processing, done
   retryCount: {}, // Track retry attempts per order: { orderId: attemptCount }
-  retried: 0 // Count of orders that succeeded after retry
+  retried: 0, // Count of orders that succeeded after retry
+  dateFilter: null // Optional date filter: { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
 };
 
 // Listen for messages from popup
@@ -76,6 +77,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'DOWNLOAD_XLSX':
       downloadXLSX().then(sendResponse);
+      return true;
+
+    case 'GET_EXPORT_HISTORY':
+      getExportHistory().then(sendResponse);
       return true;
 
     case 'ORDER_IDS_COLLECTED':
@@ -153,8 +158,14 @@ async function handleStart(message) {
     isProcessingOrder: false,
     phase: 'collecting',
     retryCount: {},
-    retried: 0
+    retried: 0,
+    dateFilter: message.dateFilter || null // Store date filter
   };
+
+  // Log date filter if present
+  if (state.dateFilter) {
+    log(`Date filter: ${state.dateFilter.startDate} to ${state.dateFilter.endDate}`);
+  }
 
   // Clear previous session
   await chrome.storage.local.remove(['sessionState']);
@@ -313,10 +324,20 @@ async function collectOrderIds() {
   broadcastStatus('Collecting order IDs...');
 
   try {
-    await chrome.tabs.sendMessage(state.currentTabId, {
+    // Build message with optional date filter
+    const message = {
       type: 'COLLECT_ORDER_IDS',
       maxOrders: state.maxOrders
-    });
+    };
+
+    // Add date filter if present
+    if (state.dateFilter) {
+      message.dateFilter = state.dateFilter;
+      log(`Applying date filter: ${state.dateFilter.startDate} to ${state.dateFilter.endDate}`);
+      broadcastStatus('Applying date filter...');
+    }
+
+    await chrome.tabs.sendMessage(state.currentTabId, message);
   } catch (error) {
     log('Error collecting order IDs: ' + error.message, 'error');
     handleStop();
@@ -625,6 +646,47 @@ async function handleOrderFailed(orderId, reason) {
 }
 
 /**
+ * Get export history
+ */
+async function getExportHistory() {
+  try {
+    const storage = await chrome.storage.local.get(['exportHistory']);
+    return { success: true, history: storage.exportHistory || [] };
+  } catch (error) {
+    return { error: error.message };
+  }
+}
+
+/**
+ * Save export to history
+ */
+async function saveExportHistory(format, count, filename) {
+  try {
+    const storage = await chrome.storage.local.get(['exportHistory']);
+    const history = storage.exportHistory || [];
+
+    // Add new export record
+    history.unshift({
+      id: Date.now(),
+      format: format,
+      count: count,
+      filename: filename,
+      exportedAt: new Date().toISOString()
+    });
+
+    // Keep only last 50 exports
+    if (history.length > 50) {
+      history.length = 50;
+    }
+
+    await chrome.storage.local.set({ exportHistory: history });
+    debugLog('Export history saved');
+  } catch (error) {
+    debugLog('Failed to save export history:', error);
+  }
+}
+
+/**
  * Get order data headers
  */
 function getExportHeaders() {
@@ -702,6 +764,9 @@ async function downloadCSV() {
       saveAs: true
     });
 
+    // Save to export history
+    await saveExportHistory('CSV', allOrders.length, filename);
+
     log(`Downloaded ${filename} (${allOrders.length} orders)`);
     return { success: true, filename, count: allOrders.length };
   } catch (error) {
@@ -763,6 +828,9 @@ async function downloadXLSX() {
       filename: filename,
       saveAs: true
     });
+
+    // Save to export history
+    await saveExportHistory('XLSX', allOrders.length, filename);
 
     log(`Downloaded ${filename} (${allOrders.length} orders)`);
     return { success: true, filename, count: allOrders.length };
@@ -851,4 +919,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.6.0');
+console.log('[TikTok Order Exporter] Background service worker started v2.8.0');

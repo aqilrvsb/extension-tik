@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "TikTok Order Exporter",
-  "version": "2.6.0",
-  "description": "Export TikTok Shop shipped orders with customer details to Excel/CSV - with live dashboard",
+  "version": "2.8.0",
+  "description": "Export TikTok Shop shipped orders with customer details to Excel/CSV - with date range filter",
   "permissions": [
     "activeTab",
     "tabs",
