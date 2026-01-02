@@ -716,7 +716,7 @@
 <body>
   <div class="container">
     <div class="header">
-      <h1>TikTok Order Exporter</h1>
+      <h1>Tiktok Aqil Az Exporter</h1>
       <p>Export shipped orders to Excel</p>
     </div>
 
@@ -728,6 +728,14 @@
 
       <!-- License Info Section -->
       <div class="license-info-section" id="licenseInfoSection" style="display: none;">
+        <div class="license-info-row">
+          <span class="license-info-label">Shop Name:</span>
+          <span class="license-info-value" id="licenseShopName">-</span>
+        </div>
+        <div class="license-info-row">
+          <span class="license-info-label">Shop Code:</span>
+          <span class="license-info-value" id="licenseShopCode">-</span>
+        </div>
         <div class="license-info-row">
           <span class="license-info-label">Package:</span>
           <span class="license-info-value" id="licensePackage">-</span>
@@ -846,7 +854,7 @@
         <!-- Date Filter (Single Date - Always Visible) -->
         <div class="date-filter-section">
           <div class="setting-row">
-            <span class="setting-label">📅 Date:</span>
+            <span class="setting-label">📅 Date Filter Shipped:</span>
             <input type="date" class="date-input" id="filterDate" style="flex: 1;">
           </div>
         </div>
@@ -875,7 +883,7 @@
     </div>
 
     <div class="footer">
-      v3.0.6 - Auto-detect Max Pages
+      v3.0.7 - Shop Name Display
     </div>
   </div>
 

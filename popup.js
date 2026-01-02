@@ -78,82 +78,176 @@ const orderProgress = document.getElementById('orderProgress');
 // ========================================
 
 /**
- * Get the current shop code from the active TikTok Seller Center tab
+ * Get the current shop code and shop name from the active TikTok Seller Center tab
+ * Returns { shopCode, shopName } or { shopCode: null, shopName: null }
  */
-async function getCurrentShopCode() {
+async function getCurrentShopInfo() {
   return new Promise((resolve) => {
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       const tab = tabs[0];
       if (!tab || !tab.url || !tab.url.includes('seller')) {
-        resolve(null);
+        resolve({ shopCode: null, shopName: null });
         return;
       }
 
       try {
-        // Execute script to get shop code from page
+        // Execute script to get shop code and shop name from page
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
+            let shopCode = null;
+            let shopName = null;
+
+            // ========================================
+            // EXTRACT SHOP CODE
+            // ========================================
+
             // Method 1: Find the EXACT element containing "Shop Code:" text
             // Looking for elements like: <div class="css-14kkcet">Shop Code: MYLCV9LW9B</div>
-            // Must be a leaf element (no children with text) to avoid picking up parent containers
             const allElements = document.querySelectorAll('div, span, p');
             for (const el of allElements) {
-              // Get ONLY direct text content of this element (not children)
               const directText = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
                 ? el.childNodes[0].textContent.trim()
                 : el.textContent.trim();
 
-              // Must be short text containing "Shop Code:" - avoid large container divs
               if (directText.length < 50 && (directText.includes('Shop Code:') || directText.includes('Shop Code :'))) {
-                // Extract EXACTLY 10 characters after "Shop Code:"
-                // TikTok shop codes are exactly 10 chars like MYLCV9LW9B
                 const match = directText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{10})\b/i);
                 if (match && match[1]) {
-                  console.log('[ShopCodeDetect] Found exact match:', match[1]);
-                  return match[1].toUpperCase();
+                  console.log('[ShopDetect] Found shop code:', match[1]);
+                  shopCode = match[1].toUpperCase();
+                  break;
                 }
               }
             }
 
-            // Method 2: Search in full body text with strict 10-char pattern
-            const bodyText = document.body.innerText || '';
-            const textMatch = bodyText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{10})\b/i);
-            if (textMatch && textMatch[1]) {
-              console.log('[ShopCodeDetect] Found in body text:', textMatch[1]);
-              return textMatch[1].toUpperCase();
-            }
-
-            // Method 3: Look in URL params
-            const urlMatch = window.location.href.match(/[?&]shop_code=([A-Z0-9]+)/i);
-            if (urlMatch) {
-              console.log('[ShopCodeDetect] Found in URL:', urlMatch[1]);
-              return urlMatch[1].toUpperCase();
-            }
-
-            // Method 4: Search in script tags for JSON data
-            const scripts = document.querySelectorAll('script');
-            for (const script of scripts) {
-              const content = script.textContent || '';
-              const jsonMatch = content.match(/["']shop_?[Cc]ode["']\s*:\s*["']([A-Z0-9]{10})["']/i);
-              if (jsonMatch) {
-                console.log('[ShopCodeDetect] Found in script:', jsonMatch[1]);
-                return jsonMatch[1].toUpperCase();
+            // Method 2: Search in full body text
+            if (!shopCode) {
+              const bodyText = document.body.innerText || '';
+              const textMatch = bodyText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{10})\b/i);
+              if (textMatch && textMatch[1]) {
+                console.log('[ShopDetect] Found shop code in body:', textMatch[1]);
+                shopCode = textMatch[1].toUpperCase();
               }
             }
 
-            console.log('[ShopCodeDetect] No shop code found');
-            return null;
+            // Method 3: Look in URL params
+            if (!shopCode) {
+              const urlMatch = window.location.href.match(/[?&]shop_code=([A-Z0-9]+)/i);
+              if (urlMatch) {
+                console.log('[ShopDetect] Found shop code in URL:', urlMatch[1]);
+                shopCode = urlMatch[1].toUpperCase();
+              }
+            }
+
+            // ========================================
+            // EXTRACT SHOP NAME
+            // ========================================
+
+            // Method 1: Find the shop name element - it's usually a sibling/near "Shop Code:" element
+            // Structure: <div class="css-rus4j3">
+            //   <div class="p-oft...">SYNAX.HQ</div>  <-- Shop Name
+            //   <div class="css-14kkcet">Shop Code: MYLCV9LW9B</div>
+            // </div>
+
+            // Look for container that has both shop name and shop code
+            const containers = document.querySelectorAll('[class*="css-"]');
+            for (const container of containers) {
+              const text = container.textContent || '';
+              if (text.includes('Shop Code:') && text.includes('Owner')) {
+                // Find the shop name - usually first text element that's NOT Shop Code and NOT Owner
+                const children = container.querySelectorAll('div, span');
+                for (const child of children) {
+                  const childText = child.textContent?.trim() || '';
+                  // Shop name is usually short, doesn't contain "Shop Code", "Owner"
+                  if (childText.length > 0 &&
+                      childText.length < 50 &&
+                      !childText.includes('Shop Code') &&
+                      !childText.includes('Owner') &&
+                      !childText.match(/^[A-Z0-9]{10}$/) && // Not a shop code
+                      child.children.length === 0) { // Leaf element
+                    // Check if this element has class indicating it's the shop name
+                    if (child.classList.contains('p-oft') ||
+                        child.classList.contains('p-oft-sin') ||
+                        child.className.includes('overflow')) {
+                      console.log('[ShopDetect] Found shop name via class:', childText);
+                      shopName = childText;
+                      break;
+                    }
+                  }
+                }
+                if (shopName) break;
+              }
+            }
+
+            // Method 2: Find p-oft element directly (TikTok uses this for shop name)
+            if (!shopName) {
+              const oftElements = document.querySelectorAll('.p-oft, .p-oft-sin, [class*="overflow_text"]');
+              for (const el of oftElements) {
+                const text = el.textContent?.trim() || '';
+                // Shop name should be reasonable length and not contain special keywords
+                if (text.length > 1 &&
+                    text.length < 50 &&
+                    !text.includes('Shop Code') &&
+                    !text.includes('Owner') &&
+                    !text.match(/^[A-Z0-9]{10}$/)) {
+                  // Check if this is near a Shop Code element
+                  const parent = el.closest('[class*="css-"]');
+                  if (parent && parent.textContent?.includes('Shop Code:')) {
+                    console.log('[ShopDetect] Found shop name via p-oft:', text);
+                    shopName = text;
+                    break;
+                  }
+                }
+              }
+            }
+
+            // Method 3: Look for avatar container with shop info
+            if (!shopName) {
+              const avatarContainers = document.querySelectorAll('[class*="avatar"]');
+              for (const avatar of avatarContainers) {
+                const parent = avatar.closest('div');
+                if (parent) {
+                  const siblings = parent.parentElement?.children || [];
+                  for (const sibling of siblings) {
+                    if (sibling !== parent && sibling.textContent?.includes('Shop Code:')) {
+                      // Found the info container, look for shop name
+                      const nameEl = sibling.querySelector('.p-oft, .p-oft-sin, [data-tid="m4b_overflow_text"]');
+                      if (nameEl) {
+                        const text = nameEl.textContent?.trim();
+                        if (text && text.length < 50) {
+                          console.log('[ShopDetect] Found shop name via avatar sibling:', text);
+                          shopName = text;
+                          break;
+                        }
+                      }
+                    }
+                  }
+                }
+                if (shopName) break;
+              }
+            }
+
+            console.log('[ShopDetect] Final result - Code:', shopCode, 'Name:', shopName);
+            return { shopCode, shopName };
           }
         });
 
-        resolve(results[0]?.result || null);
+        resolve(results[0]?.result || { shopCode: null, shopName: null });
       } catch (error) {
-        console.error('Error getting shop code:', error);
-        resolve(null);
+        console.error('Error getting shop info:', error);
+        resolve({ shopCode: null, shopName: null });
       }
     });
   });
+}
+
+/**
+ * Get the current shop code from the active TikTok Seller Center tab
+ * (Backward compatible wrapper)
+ */
+async function getCurrentShopCode() {
+  const info = await getCurrentShopInfo();
+  return info.shopCode;
 }
 
 /**
@@ -327,8 +421,10 @@ async function validateShopCode(shopCode) {
  * Returns true if license is valid, false otherwise
  */
 async function checkLicenseBeforeStart() {
-  // Get current shop code FIRST - this is REQUIRED
-  const currentShopCode = await getCurrentShopCode();
+  // Get current shop code and name FIRST - this is REQUIRED
+  const shopInfo = await getCurrentShopInfo();
+  const currentShopCode = shopInfo.shopCode;
+  const currentShopName = shopInfo.shopName;
 
   if (!currentShopCode) {
     // Must be on TikTok Seller Center page to detect shop code
@@ -337,14 +433,17 @@ async function checkLicenseBeforeStart() {
     return false;
   }
 
-  debugLog('[License] Current shop code:', currentShopCode);
-  addLog(`Validating shop: ${currentShopCode}...`, 'info');
+  debugLog('[License] Current shop code:', currentShopCode, 'Name:', currentShopName);
+  addLog(`Validating shop: ${currentShopName || currentShopCode}...`, 'info');
 
   // ALWAYS validate fresh from Supabase on every export start
   // No caching - verify every time to ensure license is still valid
   const result = await validateShopCode(currentShopCode);
 
   if (result.valid) {
+    // Add shop name to result for display
+    result.shopName = currentShopName;
+
     // Check if this is a newly created trial
     if (result.isNewTrial) {
       addLog('Welcome! TRIAL license created (2 days)', 'success');
@@ -382,6 +481,18 @@ function updateLicenseInfoDisplay(licenseData) {
 
   // Show the section
   licenseInfoSection.style.display = 'block';
+
+  // Set shop name (if available)
+  const shopNameEl = document.getElementById('licenseShopName');
+  if (shopNameEl) {
+    shopNameEl.textContent = licenseData.shopName || '-';
+  }
+
+  // Set shop code
+  const shopCodeEl = document.getElementById('licenseShopCode');
+  if (shopCodeEl) {
+    shopCodeEl.textContent = licenseData.shopCode || '-';
+  }
 
   // Set package type
   const packageType = licenseData.packageType || 'PRO';
@@ -426,7 +537,10 @@ function hideLicenseInfoDisplay() {
  * Also shows messages for new trials and expired licenses
  */
 async function checkAndDisplayLicenseInfo() {
-  const currentShopCode = await getCurrentShopCode();
+  // Get both shop code and shop name
+  const shopInfo = await getCurrentShopInfo();
+  const currentShopCode = shopInfo.shopCode;
+  const currentShopName = shopInfo.shopName;
 
   if (!currentShopCode) {
     hideLicenseInfoDisplay();
@@ -436,11 +550,13 @@ async function checkAndDisplayLicenseInfo() {
   const result = await validateShopCode(currentShopCode);
 
   if (result.valid) {
+    // Add shop name to result for display
+    result.shopName = currentShopName;
     updateLicenseInfoDisplay(result);
 
     // Show welcome message for new trial
     if (result.isNewTrial) {
-      addLog(`Welcome ${currentShopCode}! TRIAL activated (2 days)`, 'success');
+      addLog(`Welcome ${currentShopName || currentShopCode}! TRIAL activated (2 days)`, 'success');
     }
 
     // Warning for expiring soon
@@ -452,7 +568,7 @@ async function checkAndDisplayLicenseInfo() {
 
     // Show expired message
     if (result.isExpired) {
-      addLog(`Shop ${currentShopCode}: License expired`, 'error');
+      addLog(`Shop ${currentShopName || currentShopCode}: License expired`, 'error');
       addLog('Please renew to continue using', 'info');
     }
   }
