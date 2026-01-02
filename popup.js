@@ -128,8 +128,73 @@ async function getCurrentShopCode() {
 }
 
 /**
+ * Generate a random license key (internal use only)
+ */
+function generateLicenseKey() {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+  let key = '';
+  for (let i = 0; i < 16; i++) {
+    if (i > 0 && i % 4 === 0) key += '-';
+    key += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return key;
+}
+
+/**
+ * Create a new TRIAL license for a shop code
+ */
+async function createTrialLicense(shopCode) {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // TRIAL = 2 days validity
+    const validUntil = new Date(today);
+    validUntil.setDate(validUntil.getDate() + 2);
+    validUntil.setHours(23, 59, 59, 999);
+
+    const licenseKey = generateLicenseKey();
+
+    const response = await fetch(
+      `${SUPABASE_URL}/rest/v1/licenses`,
+      {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'return=representation'
+        },
+        body: JSON.stringify({
+          license_key: licenseKey,
+          shop_code: shopCode.toUpperCase().trim(),
+          shop_name: null,
+          package_type: 'TRIAL',
+          notes: 'Auto-created TRIAL from extension',
+          valid_from: today.toISOString(),
+          valid_until: validUntil.toISOString(),
+          is_active: true
+        })
+      }
+    );
+
+    if (!response.ok) {
+      console.error('Failed to create trial license:', await response.text());
+      return null;
+    }
+
+    const created = await response.json();
+    return created[0] || created;
+  } catch (error) {
+    console.error('Error creating trial license:', error);
+    return null;
+  }
+}
+
+/**
  * Validate shop code against Supabase licenses table
- * Now validates by shop_code directly instead of license_key
+ * - If shop doesn't exist: auto-create TRIAL license
+ * - If expired: show renewal message
  */
 async function validateShopCode(shopCode) {
   try {
@@ -149,15 +214,37 @@ async function validateShopCode(shopCode) {
 
     const licenses = await response.json();
 
+    // Shop not found - auto-create TRIAL license
     if (licenses.length === 0) {
-      return { valid: false, error: `Shop ${shopCode} is not licensed. Please contact admin.` };
+      debugLog('[License] Shop not found, creating TRIAL license...');
+
+      const newLicense = await createTrialLicense(shopCode);
+
+      if (newLicense) {
+        // Calculate days remaining (should be 2 for new trial)
+        const validUntil = new Date(newLicense.valid_until);
+        const now = new Date();
+        const daysRemaining = Math.ceil((validUntil - now) / (1000 * 60 * 60 * 24));
+
+        return {
+          valid: true,
+          license: newLicense,
+          daysRemaining: daysRemaining,
+          shopCode: newLicense.shop_code,
+          packageType: 'TRIAL',
+          validUntil: newLicense.valid_until,
+          isNewTrial: true // Flag to show welcome message
+        };
+      } else {
+        return { valid: false, error: 'Failed to create trial license. Please contact admin.' };
+      }
     }
 
     const license = licenses[0];
 
     // Check if license is active
     if (!license.is_active) {
-      return { valid: false, error: 'License has been disabled' };
+      return { valid: false, error: 'License has been disabled. Please contact admin.' };
     }
 
     // Check if license is expired
@@ -169,8 +256,15 @@ async function validateShopCode(shopCode) {
       return { valid: false, error: 'License not yet valid' };
     }
 
+    // EXPIRED - show renewal message
     if (now > validUntil) {
-      return { valid: false, error: 'License has expired' };
+      const expiredDays = Math.ceil((now - validUntil) / (1000 * 60 * 60 * 24));
+      return {
+        valid: false,
+        error: `License expired ${expiredDays} day(s) ago. Please renew to continue using.`,
+        isExpired: true,
+        packageType: license.package_type || 'PRO'
+      };
     }
 
     // Calculate days remaining
@@ -193,6 +287,8 @@ async function validateShopCode(shopCode) {
 /**
  * Check license before starting export
  * Now validates by shop code directly - no license key input needed
+ * - Auto-creates TRIAL for new shops
+ * - Shows renewal message for expired
  * Returns true if license is valid, false otherwise
  */
 async function checkLicenseBeforeStart() {
@@ -214,13 +310,30 @@ async function checkLicenseBeforeStart() {
   const result = await validateShopCode(currentShopCode);
 
   if (result.valid) {
-    addLog(`License valid! ${result.daysRemaining} days remaining`, 'success');
+    // Check if this is a newly created trial
+    if (result.isNewTrial) {
+      addLog('Welcome! TRIAL license created (2 days)', 'success');
+      addLog('Contact admin to upgrade to PRO package', 'info');
+    } else {
+      addLog(`License valid! ${result.daysRemaining} days remaining`, 'success');
+    }
+
+    // Warning if expiring soon
+    if (result.daysRemaining <= 3) {
+      addLog(`License expiring soon! Renew to avoid interruption.`, 'warn');
+    }
+
     // Update license info display
     updateLicenseInfoDisplay(result);
     return true;
   } else {
     // License validation failed
-    addLog(result.error, 'error');
+    if (result.isExpired) {
+      addLog(result.error, 'error');
+      addLog('Contact admin to renew your license.', 'info');
+    } else {
+      addLog(result.error, 'error');
+    }
     hideLicenseInfoDisplay();
     return false;
   }
@@ -275,6 +388,7 @@ function hideLicenseInfoDisplay() {
 
 /**
  * Check and display license info on popup open
+ * Also shows messages for new trials and expired licenses
  */
 async function checkAndDisplayLicenseInfo() {
   const currentShopCode = await getCurrentShopCode();
@@ -288,8 +402,24 @@ async function checkAndDisplayLicenseInfo() {
 
   if (result.valid) {
     updateLicenseInfoDisplay(result);
+
+    // Show welcome message for new trial
+    if (result.isNewTrial) {
+      addLog(`Welcome ${currentShopCode}! TRIAL activated (2 days)`, 'success');
+    }
+
+    // Warning for expiring soon
+    if (result.daysRemaining <= 3 && !result.isNewTrial) {
+      addLog(`License expiring in ${result.daysRemaining} day(s)!`, 'warn');
+    }
   } else {
     hideLicenseInfoDisplay();
+
+    // Show expired message
+    if (result.isExpired) {
+      addLog(`Shop ${currentShopCode}: License expired`, 'error');
+      addLog('Please renew to continue using', 'info');
+    }
   }
 }
 
