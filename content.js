@@ -284,46 +284,70 @@ async function clickPage(pageNum) {
 
 /**
  * Click the Shipped tab to ensure we're viewing shipped orders
+ * Uses exact TikTok Seller Center selectors
  * @returns {boolean} - true if Shipped tab was clicked or already active
  */
 async function clickShippedTab() {
   debugLog(' Clicking Shipped tab...');
 
   try {
-    // Method 1: Look for Shipped tab with data attribute
+    // Method 1: Use the exact data-log_click_for="shipped" attribute
+    // Structure: <div data-log_click_for="shipped" data-log_module_name="order_list_tab">
     const shippedTab = document.querySelector('[data-log_click_for="shipped"]');
     if (shippedTab) {
-      debugLog(' Found Shipped tab via data attribute');
+      debugLog(' Found Shipped tab via data-log_click_for="shipped"');
       shippedTab.click();
       await sleep(1500); // Wait for tab to load
       return true;
     }
 
-    // Method 2: Look for div containing exact text "Shipped"
-    const allDivs = document.querySelectorAll('div');
-    for (const div of allDivs) {
-      if (div.textContent?.trim() === 'Shipped' && div.classList.length > 0) {
-        // Check if this looks like a tab (has click handler or parent is clickable)
-        const parent = div.closest('[role="tab"], [data-log_click_for], .tab-item, .arco-tabs-tab');
-        if (parent) {
-          debugLog(' Found Shipped tab via parent element');
-          parent.click();
-          await sleep(1500);
-          return true;
-        }
-        // Try clicking the div itself
-        debugLog(' Found Shipped text, clicking...');
-        div.click();
+    // Method 2: Look for pulse-tabs-pane-title containing "Shipped"
+    const tabTitles = document.querySelectorAll('.pulse-tabs-pane-title, .pulse-tabs-pane-title-content');
+    for (const title of tabTitles) {
+      if (title.textContent?.includes('Shipped')) {
+        debugLog(' Found Shipped via pulse-tabs-pane-title');
+        // Click the inner div with data-log_click_for or the title itself
+        const clickTarget = title.querySelector('[data-log_click_for="shipped"]') || title;
+        clickTarget.click();
         await sleep(1500);
         return true;
       }
     }
 
-    // Method 3: Look for tab with "Shipped" text and number pattern
-    const tabs = document.querySelectorAll('[role="tab"], .arco-tabs-tab');
+    // Method 3: Look for div with exact "Shipped" text followed by count
+    const allDivs = document.querySelectorAll('div');
+    for (const div of allDivs) {
+      // Match div that contains exactly "Shipped" (not "Shipped to" etc)
+      if (div.childNodes.length > 0) {
+        const firstChild = div.childNodes[0];
+        if (firstChild.nodeType === Node.ELEMENT_NODE || firstChild.nodeType === Node.TEXT_NODE) {
+          const text = firstChild.textContent?.trim();
+          if (text === 'Shipped') {
+            // Check if this is part of the tab structure
+            const parent = div.closest('.pulse-tabs-pane-title') ||
+                          div.closest('[data-log_module_name="order_list_tab"]') ||
+                          div.closest('[role="tab"]');
+            if (parent) {
+              debugLog(' Found Shipped tab via parent structure');
+              parent.click();
+              await sleep(1500);
+              return true;
+            }
+            // Try clicking the div itself
+            debugLog(' Clicking Shipped div directly');
+            div.click();
+            await sleep(1500);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Method 4: Look for tab with "Shipped" text and a count number
+    const tabs = document.querySelectorAll('[role="tab"], .arco-tabs-tab, [class*="tab"]');
     for (const tab of tabs) {
-      if (tab.textContent?.includes('Shipped')) {
-        debugLog(' Found Shipped tab via role="tab"');
+      if (tab.textContent?.includes('Shipped') && /\d+/.test(tab.textContent)) {
+        debugLog(' Found Shipped tab via role="tab" with count');
         tab.click();
         await sleep(1500);
         return true;
@@ -341,81 +365,102 @@ async function clickShippedTab() {
 
 /**
  * Select "Time shipped" option from the filter dropdown
+ * Uses exact TikTok Seller Center selectors
  * @returns {boolean} - true if Time shipped was selected
  */
 async function selectTimeShippedFilter() {
   debugLog(' Selecting Time shipped filter...');
 
   try {
-    // Look for the dropdown that shows "Time created" or similar
-    // and change it to "Time shipped"
+    // Method 1: Find the core-select-view containing "Time created" or "Time shipped"
+    // TikTok uses: <div class="core-select-view">...<span class="core-select-view-value">Time created</span>
+    const selectViews = document.querySelectorAll('.core-select-view');
 
-    // Method 1: Find dropdown with "Time created" text and click it
-    const dropdowns = document.querySelectorAll('.arco-select, .core-select, [class*="select"], [class*="dropdown"]');
+    for (const selectView of selectViews) {
+      const valueSpan = selectView.querySelector('.core-select-view-value');
+      const text = valueSpan?.textContent?.trim() || '';
 
-    for (const dropdown of dropdowns) {
-      const text = dropdown.textContent || '';
-      if (text.includes('Time created') || text.includes('Time shipped')) {
-        debugLog(' Found time filter dropdown');
-        dropdown.click();
-        await sleep(500);
+      if (text === 'Time created' || text === 'Time shipped') {
+        debugLog(' Found time filter dropdown with value:', text);
 
-        // Now find and click "Time shipped" option
-        const options = document.querySelectorAll('.arco-select-option, .core-select-option, [class*="option"], [role="option"]');
-        for (const option of options) {
-          if (option.textContent?.includes('Time shipped')) {
-            debugLog(' Clicking Time shipped option');
-            option.click();
-            await sleep(500);
-            return true;
-          }
-        }
-      }
-    }
-
-    // Method 2: Look for any element with "Time created" text and click it
-    const allElements = document.querySelectorAll('*');
-    for (const el of allElements) {
-      // Only check leaf nodes or elements with minimal children
-      if (el.children.length <= 2 && el.textContent?.trim() === 'Time created') {
-        debugLog(' Found "Time created" text, clicking to open dropdown');
-        el.click();
-        await sleep(500);
-
-        // Find "Time shipped" option
-        const options = document.querySelectorAll('[role="option"], [class*="option"], .arco-select-option');
-        for (const option of options) {
-          if (option.textContent?.includes('Time shipped')) {
-            debugLog(' Clicking Time shipped option');
-            option.click();
-            await sleep(500);
-            return true;
-          }
-        }
-
-        // Also check for any visible "Time shipped" text that appeared
-        const timeShippedElements = document.querySelectorAll('*');
-        for (const tsEl of timeShippedElements) {
-          if (tsEl.textContent?.trim() === 'Time shipped' && tsEl !== el) {
-            debugLog(' Found Time shipped element after dropdown opened');
-            tsEl.click();
-            await sleep(500);
-            return true;
-          }
-        }
-      }
-    }
-
-    // Method 3: Direct search for "Time shipped" option in any popup/dropdown
-    const popups = document.querySelectorAll('[role="listbox"], .arco-select-popup, .core-select-dropdown, [class*="popup"], [class*="dropdown-menu"]');
-    for (const popup of popups) {
-      const options = popup.querySelectorAll('*');
-      for (const option of options) {
-        if (option.textContent?.trim() === 'Time shipped') {
-          debugLog(' Found Time shipped in popup');
-          option.click();
-          await sleep(500);
+        // If already "Time shipped", no need to change
+        if (text === 'Time shipped') {
+          debugLog(' Already set to Time shipped');
           return true;
+        }
+
+        // Click to open dropdown
+        selectView.click();
+        await sleep(600);
+
+        // Find and click "Time shipped" option in the dropdown popup
+        // Options usually appear in a portal/popup with class core-select-option
+        const options = document.querySelectorAll('.core-select-option, [class*="select-option"], [role="option"]');
+        for (const option of options) {
+          if (option.textContent?.includes('Time shipped')) {
+            debugLog(' Clicking Time shipped option');
+            option.click();
+            await sleep(500);
+            return true;
+          }
+        }
+
+        // Fallback: Search all visible elements for "Time shipped"
+        const allVisible = document.querySelectorAll('div, span, li');
+        for (const el of allVisible) {
+          if (el.textContent?.trim() === 'Time shipped' && el.offsetParent !== null) {
+            debugLog(' Found visible Time shipped element');
+            el.click();
+            await sleep(500);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Method 2: Direct search for select with "Time created" in value
+    const selects = document.querySelectorAll('[class*="select"]');
+    for (const select of selects) {
+      const text = select.textContent || '';
+      if (text.includes('Time created') && !text.includes('Time shipped')) {
+        debugLog(' Found select with Time created text');
+        select.click();
+        await sleep(600);
+
+        // Wait for dropdown to appear and find Time shipped
+        const options = document.querySelectorAll('[class*="option"]');
+        for (const option of options) {
+          if (option.textContent?.includes('Time shipped')) {
+            debugLog(' Clicking Time shipped option from fallback');
+            option.click();
+            await sleep(500);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Method 3: Look for line-clamp div with exact text
+    const lineClampDivs = document.querySelectorAll('.line-clamp-2, [class*="line-clamp"]');
+    for (const div of lineClampDivs) {
+      if (div.textContent?.trim() === 'Time created') {
+        debugLog(' Found line-clamp Time created, clicking parent');
+        // Click the parent select-view
+        const parent = div.closest('.core-select-view') || div.closest('[class*="select"]');
+        if (parent) {
+          parent.click();
+          await sleep(600);
+
+          // Find Time shipped option
+          const options = document.querySelectorAll('[class*="option"]');
+          for (const option of options) {
+            if (option.textContent?.includes('Time shipped')) {
+              debugLog(' Clicking Time shipped');
+              option.click();
+              await sleep(500);
+              return true;
+            }
+          }
         }
       }
     }
