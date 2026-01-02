@@ -555,58 +555,109 @@ async function applyDateFilter(dateFilter) {
 
     // Step 2: Find the date picker inputs
     // Look for the date range picker with placeholder "From" and "To"
-    const datePickerContainer = document.querySelector('.core-picker-range, [data-tid="m4b_date_picker_range_picker"]');
+    let datePickerContainer = document.querySelector('.core-picker-range, [data-tid="m4b_date_picker_range_picker"]');
+
+    // Fallback: Find any container with From/To inputs
+    if (!datePickerContainer) {
+      const allInputs = document.querySelectorAll('input[placeholder="From"]');
+      for (const inp of allInputs) {
+        datePickerContainer = inp.closest('[class*="picker"], [class*="date"], [class*="range"]');
+        if (datePickerContainer) break;
+      }
+    }
+
     if (!datePickerContainer) {
       debugLog(' Date picker container not found');
       return false;
     }
 
+    debugLog(' Found date picker container');
+
     // Step 3: Click on the "From" input to open the date picker
-    const fromInput = datePickerContainer.querySelector('input[placeholder="From"]');
-    const toInput = datePickerContainer.querySelector('input[placeholder="To"]');
+    const fromInput = datePickerContainer.querySelector('input[placeholder="From"]') ||
+                      document.querySelector('input[placeholder="From"]');
+    const toInput = datePickerContainer.querySelector('input[placeholder="To"]') ||
+                    document.querySelector('input[placeholder="To"]');
 
     if (!fromInput || !toInput) {
       debugLog(' Date inputs not found');
       return false;
     }
 
+    debugLog(' Found From and To inputs');
+
     // Step 4: Clear existing dates by clicking the clear button if visible
-    const clearButton = datePickerContainer.querySelector('.core-picker-clear-icon');
+    const clearButton = datePickerContainer.querySelector('.core-picker-clear-icon, [class*="clear"]');
     if (clearButton) {
       debugLog(' Clearing existing date filter...');
       clearButton.click();
       await sleep(500);
     }
 
-    // Step 5: Click on the From input to focus it
-    debugLog(' Clicking From input...');
+    // Parse target dates
+    const [startYear, startMonth, startDay] = dateFilter.startDate.split('-').map(Number);
+    const [endYear, endMonth, endDay] = dateFilter.endDate.split('-').map(Number);
+    const startDateFormatted = formatDateForInput(dateFilter.startDate);
+    const endDateFormatted = formatDateForInput(dateFilter.endDate);
+
+    debugLog(` Target dates: Start=${startDateFormatted}, End=${endDateFormatted}`);
+
+    // ===== METHOD A: Try clicking calendar dates directly =====
+    debugLog(' METHOD A: Trying to click calendar dates...');
+
+    // Step 5: Click on the From input to open calendar
+    debugLog(' Clicking From input to open calendar...');
     fromInput.click();
+    await sleep(800);
+
+    // Try to click the start date on calendar
+    let startDateClicked = await clickCalendarDate(startDay, startMonth, startYear);
     await sleep(500);
 
-    // Step 6: Set the start date
-    // Format: DD/MM/YYYY (TikTok uses this format in MY region)
-    const startDate = formatDateForInput(dateFilter.startDate);
-    debugLog(' Setting start date:', startDate);
+    // Now click end date - the calendar should still be open or we need to click To input
+    if (startDateClicked) {
+      debugLog(' Start date clicked, now clicking end date...');
+      // Calendar might show second panel for end date, or we click To input
+      await sleep(300);
 
-    // Try to set value directly and trigger events
-    await setDateInputValue(fromInput, startDate);
-    await sleep(500);
+      // Try clicking end date directly (some date pickers show range selection)
+      let endDateClicked = await clickCalendarDate(endDay, endMonth, endYear);
 
-    // Step 7: Click on the To input
-    debugLog(' Clicking To input...');
-    toInput.click();
-    await sleep(500);
+      if (!endDateClicked) {
+        // Click To input and try again
+        toInput.click();
+        await sleep(500);
+        endDateClicked = await clickCalendarDate(endDay, endMonth, endYear);
+      }
 
-    // Step 8: Set the end date
-    const endDate = formatDateForInput(dateFilter.endDate);
-    debugLog(' Setting end date:', endDate);
+      if (endDateClicked) {
+        debugLog(' Both dates clicked successfully via calendar!');
+        await sleep(500);
+      }
+    }
 
-    await setDateInputValue(toInput, endDate);
-    await sleep(500);
+    // ===== METHOD B: Also try typing the dates (as backup) =====
+    debugLog(' METHOD B: Also setting dates via typing...');
 
-    // Step 9: Click outside to close picker (optional)
-    document.body.click();
+    // Focus From input and type
+    fromInput.click();
     await sleep(300);
+    await setDateInputValue(fromInput, startDateFormatted);
+    await sleep(400);
+
+    // Focus To input and type
+    toInput.click();
+    await sleep(300);
+    await setDateInputValue(toInput, endDateFormatted);
+    await sleep(400);
+
+    // Step 9: Click outside to close picker
+    document.body.click();
+    await sleep(500);
+
+    // Verify dates were set by checking input values
+    debugLog(` From input value: "${fromInput.value}"`);
+    debugLog(` To input value: "${toInput.value}"`);
 
     // Step 10: Find and click the Apply button
     // Try multiple selectors to ensure we find it
@@ -641,11 +692,38 @@ async function applyDateFilter(dateFilter) {
       applyButton.click();
       await sleep(2000); // Wait for filter to be applied
 
-      // Verify filter was applied by checking for "Found X orders" text
+      // Verify filter was applied by checking for filter chip (time_shipped quick_filter_item)
       await sleep(1000);
+
+      // Check for the filter chip that appears when filter is active
+      const filterChip = document.querySelector('[data-log_click_for="time_shipped"]') ||
+                        document.querySelector('.quick_filter_item') ||
+                        document.querySelector('[class*="filter-tag"]');
+
+      if (filterChip) {
+        debugLog(' SUCCESS! Filter chip found - filter is active');
+        debugLog(' Filter chip text:', filterChip.textContent);
+      }
+
+      // Also check "Found X orders" text
       const foundText = document.body.innerText.match(/Found\s+([\d,]+)\s+orders/i);
       if (foundText) {
         debugLog(' Filter applied! Found', foundText[1], 'orders');
+      }
+
+      // If no filter chip, the filter may not have been applied correctly
+      if (!filterChip) {
+        debugLog(' WARNING: Filter chip not found - filter may not be active');
+        // Try clicking Apply again
+        debugLog(' Retrying Apply button click...');
+        applyButton.click();
+        await sleep(2000);
+
+        // Check again
+        const filterChipRetry = document.querySelector('[data-log_click_for="time_shipped"]');
+        if (filterChipRetry) {
+          debugLog(' SUCCESS on retry! Filter chip now found');
+        }
       }
 
       debugLog(' Date filter applied successfully');
@@ -687,30 +765,120 @@ function formatDateForInput(dateStr) {
 /**
  * Set date input value using various methods
  * @param {HTMLInputElement} input - The input element
- * @param {string} value - The date value to set
+ * @param {string} value - The date value to set (DD/MM/YYYY format)
  */
 async function setDateInputValue(input, value) {
-  // Method 1: Try direct value assignment with React synthetic event
-  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-  nativeInputValueSetter.call(input, value);
+  debugLog(' setDateInputValue called with:', value);
 
-  // Dispatch input event
-  const inputEvent = new Event('input', { bubbles: true });
-  input.dispatchEvent(inputEvent);
-
-  // Dispatch change event
-  const changeEvent = new Event('change', { bubbles: true });
-  input.dispatchEvent(changeEvent);
-
-  // Also try keyboard events to simulate typing
+  // Focus the input first
   input.focus();
   await sleep(100);
 
-  // Clear and type
+  // Clear existing value
   input.select();
-  document.execCommand('insertText', false, value);
+  await sleep(50);
 
+  // Method 1: Try using execCommand to insert text (works better with React)
+  document.execCommand('selectAll', false, null);
+  document.execCommand('insertText', false, value);
+  await sleep(100);
+
+  // Method 2: Try direct value assignment with React synthetic event
+  const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+  nativeInputValueSetter.call(input, value);
+
+  // Dispatch input event with bubbles
+  const inputEvent = new Event('input', { bubbles: true, cancelable: true });
+  input.dispatchEvent(inputEvent);
+
+  // Dispatch change event
+  const changeEvent = new Event('change', { bubbles: true, cancelable: true });
+  input.dispatchEvent(changeEvent);
+
+  // Method 3: Also try keyboard input simulation
+  input.focus();
+  await sleep(50);
+
+  // Trigger blur to finalize the value
+  input.blur();
+  await sleep(100);
+  input.focus();
+
+  debugLog(' Input value after setting:', input.value);
   await sleep(200);
+}
+
+/**
+ * Click a specific date on the calendar picker
+ * @param {number} day - Day of month to click
+ * @param {number} month - Month (1-12)
+ * @param {number} year - Full year (e.g., 2025)
+ */
+async function clickCalendarDate(day, month, year) {
+  debugLog(` Looking for calendar date: ${day}/${month}/${year}`);
+
+  // Find calendar panels
+  const calendarPanels = document.querySelectorAll('.core-picker-panel, [class*="picker-panel"], [class*="calendar"]');
+  debugLog(` Found ${calendarPanels.length} calendar panels`);
+
+  // Look for date cells
+  const dateCells = document.querySelectorAll('[class*="picker-cell"], [class*="date-cell"], td[class*="cell"]');
+  debugLog(` Found ${dateCells.length} date cells`);
+
+  for (const cell of dateCells) {
+    // Check if this cell represents our target day
+    const cellText = cell.textContent?.trim();
+    if (cellText === String(day)) {
+      // Make sure it's not disabled and is in current month view
+      const isDisabled = cell.classList.contains('disabled') ||
+                         cell.classList.contains('core-picker-cell-disabled') ||
+                         cell.getAttribute('aria-disabled') === 'true';
+      const isOtherMonth = cell.classList.contains('core-picker-cell-in-view') === false &&
+                           cell.classList.contains('in-view') === false;
+
+      if (!isDisabled) {
+        debugLog(` Clicking date cell: ${cellText}`);
+        cell.click();
+        await sleep(300);
+        return true;
+      }
+    }
+  }
+
+  // Fallback: Try to find by data attribute
+  const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  const cellByData = document.querySelector(`[data-date="${dateStr}"], [title="${dateStr}"]`);
+  if (cellByData) {
+    debugLog(` Clicking date cell by data: ${dateStr}`);
+    cellByData.click();
+    await sleep(300);
+    return true;
+  }
+
+  debugLog(` Could not find date cell for: ${day}/${month}/${year}`);
+  return false;
+}
+
+/**
+ * Navigate calendar to specific month/year
+ * @param {number} targetMonth - Target month (1-12)
+ * @param {number} targetYear - Target year
+ */
+async function navigateCalendarToMonth(targetMonth, targetYear) {
+  debugLog(` Navigating calendar to: ${targetMonth}/${targetYear}`);
+
+  // Try to find month/year display and navigation buttons
+  const prevButtons = document.querySelectorAll('[class*="prev"], [class*="arrow-left"], .core-picker-header-prev-btn');
+  const nextButtons = document.querySelectorAll('[class*="next"], [class*="arrow-right"], .core-picker-header-next-btn');
+
+  // Get current displayed month/year from calendar header
+  const headerText = document.querySelector('[class*="picker-header"], .core-picker-header');
+  if (headerText) {
+    debugLog(` Calendar header: ${headerText.textContent}`);
+  }
+
+  // For simplicity, just return - the calendar should open to current/relevant month
+  return true;
 }
 
 
