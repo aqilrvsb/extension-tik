@@ -87,109 +87,62 @@ async function getCurrentShopCode() {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // Debug: log page content for troubleshooting
-            console.log('[ShopCodeDetect] Starting detection...');
+            // Method 1: Find div/span containing "Shop Code:" text directly
+            // Looking for elements like: <div class="css-14kkcet">Shop Code: MYLCV9LW9B</div>
+            const allElements = document.querySelectorAll('div, span, p');
+            for (const el of allElements) {
+              const text = el.textContent || '';
+              // Check if this element contains "Shop Code:" pattern
+              if (text.includes('Shop Code:') || text.includes('Shop Code :')) {
+                // Extract the code after "Shop Code:"
+                const match = text.match(/Shop\s*Code\s*:\s*([A-Z0-9]{8,12})/i);
+                if (match && match[1]) {
+                  console.log('[ShopCodeDetect] Found in element:', match[1]);
+                  return match[1].toUpperCase();
+                }
+              }
+            }
 
+            // Method 2: Search in full body text
             const bodyText = document.body.innerText || '';
-            const pageHtml = document.body.innerHTML || '';
+            const textMatch = bodyText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{8,12})/i);
+            if (textMatch && textMatch[1]) {
+              console.log('[ShopCodeDetect] Found in body text:', textMatch[1]);
+              return textMatch[1].toUpperCase();
+            }
 
-            // Method 1: Look for exact "Shop Code" label pattern (most reliable)
-            // TikTok format: "Shop Code\nMYLCV9LW9B" or "Shop Code: MYLCV9LW9B"
-            const patterns = [
-              /Shop\s*Code\s*[:\n\r\s]+([A-Z0-9]{8,12})/gi,
-              /Shop\s*Code\s*([A-Z0-9]{8,12})/gi,
-              /shopCode['":\s]+([A-Z0-9]{8,12})/gi,
-              /shop_code['":\s]+([A-Z0-9]{8,12})/gi
+            // Method 3: Look for country-prefixed codes (MY, SG, TH, etc.)
+            const countryPatterns = [
+              /\b(MY[A-Z0-9]{6,10})\b/g,
+              /\b(SG[A-Z0-9]{6,10})\b/g,
+              /\b(TH[A-Z0-9]{6,10})\b/g,
+              /\b(PH[A-Z0-9]{6,10})\b/g,
+              /\b(VN[A-Z0-9]{6,10})\b/g,
+              /\b(ID[A-Z0-9]{6,10})\b/g
             ];
 
-            for (const pattern of patterns) {
-              const match = bodyText.match(pattern);
-              if (match) {
-                // Extract just the code part
-                const codeOnly = match[0].replace(/Shop\s*Code\s*[:\n\r\s]*/gi, '').replace(/shopCode['":\s]*/gi, '').replace(/shop_code['":\s]*/gi, '').trim();
-                if (codeOnly && /^[A-Z0-9]{8,12}$/i.test(codeOnly)) {
-                  console.log('[ShopCodeDetect] Found via pattern:', codeOnly);
-                  return codeOnly.toUpperCase();
-                }
+            for (const pattern of countryPatterns) {
+              const matches = bodyText.match(pattern);
+              if (matches && matches.length > 0) {
+                console.log('[ShopCodeDetect] Found country code:', matches[0]);
+                return matches[0].toUpperCase();
               }
             }
 
-            // Method 2: Find element containing "Shop Code" text and get next sibling/child with the code
-            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-            let node;
-            while (node = walker.nextNode()) {
-              const text = node.textContent.trim();
-              if (/^Shop\s*Code$/i.test(text)) {
-                // Check parent's next sibling or next text node
-                let parent = node.parentElement;
-                if (parent) {
-                  // Check next sibling element
-                  let next = parent.nextElementSibling;
-                  if (next) {
-                    const code = next.textContent.trim();
-                    if (/^[A-Z0-9]{8,12}$/i.test(code)) {
-                      console.log('[ShopCodeDetect] Found via sibling:', code);
-                      return code.toUpperCase();
-                    }
-                  }
-                  // Check parent's text content for the code
-                  const parentText = parent.parentElement?.textContent || '';
-                  const codeMatch = parentText.match(/Shop\s*Code\s*[:\s]*([A-Z0-9]{8,12})/i);
-                  if (codeMatch) {
-                    console.log('[ShopCodeDetect] Found via parent:', codeMatch[1]);
-                    return codeMatch[1].toUpperCase();
-                  }
-                }
-              }
-            }
-
-            // Method 3: Look in URL params
+            // Method 4: Look in URL params
             const urlMatch = window.location.href.match(/[?&]shop_code=([A-Z0-9]+)/i);
             if (urlMatch) {
               console.log('[ShopCodeDetect] Found in URL:', urlMatch[1]);
               return urlMatch[1].toUpperCase();
             }
 
-            // Method 4: Look for Malaysia TikTok Shop codes (MY prefix)
-            const myPatterns = [
-              /\bMY[A-Z0-9]{6,10}\b/g,
-              /\bSG[A-Z0-9]{6,10}\b/g,
-              /\bTH[A-Z0-9]{6,10}\b/g,
-              /\bPH[A-Z0-9]{6,10}\b/g,
-              /\bVN[A-Z0-9]{6,10}\b/g,
-              /\bID[A-Z0-9]{6,10}\b/g
-            ];
-
-            for (const pattern of myPatterns) {
-              const matches = bodyText.match(pattern);
-              if (matches && matches.length > 0) {
-                // Return first match that looks like a shop code
-                for (const m of matches) {
-                  if (m.length >= 8 && m.length <= 12) {
-                    console.log('[ShopCodeDetect] Found country-prefixed code:', m);
-                    return m.toUpperCase();
-                  }
-                }
-              }
-            }
-
-            // Method 5: Look in HTML attributes
-            const shopElements = document.querySelectorAll('[data-shop-code], [data-shopcode], [shopcode]');
-            for (const el of shopElements) {
-              const code = el.getAttribute('data-shop-code') || el.getAttribute('data-shopcode') || el.getAttribute('shopcode');
-              if (code && /^[A-Z0-9]{8,12}$/i.test(code)) {
-                console.log('[ShopCodeDetect] Found in attribute:', code);
-                return code.toUpperCase();
-              }
-            }
-
-            // Method 6: Search in JSON data embedded in page
+            // Method 5: Search in script tags for JSON data
             const scripts = document.querySelectorAll('script');
             for (const script of scripts) {
               const content = script.textContent || '';
               const jsonMatch = content.match(/["']shop_?[Cc]ode["']\s*:\s*["']([A-Z0-9]{8,12})["']/i);
               if (jsonMatch) {
-                console.log('[ShopCodeDetect] Found in script JSON:', jsonMatch[1]);
+                console.log('[ShopCodeDetect] Found in script:', jsonMatch[1]);
                 return jsonMatch[1].toUpperCase();
               }
             }
