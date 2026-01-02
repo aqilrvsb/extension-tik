@@ -283,7 +283,155 @@ async function clickPage(pageNum) {
 }
 
 /**
+ * Click the Shipped tab to ensure we're viewing shipped orders
+ * @returns {boolean} - true if Shipped tab was clicked or already active
+ */
+async function clickShippedTab() {
+  debugLog(' Clicking Shipped tab...');
+
+  try {
+    // Method 1: Look for Shipped tab with data attribute
+    const shippedTab = document.querySelector('[data-log_click_for="shipped"]');
+    if (shippedTab) {
+      debugLog(' Found Shipped tab via data attribute');
+      shippedTab.click();
+      await sleep(1500); // Wait for tab to load
+      return true;
+    }
+
+    // Method 2: Look for div containing exact text "Shipped"
+    const allDivs = document.querySelectorAll('div');
+    for (const div of allDivs) {
+      if (div.textContent?.trim() === 'Shipped' && div.classList.length > 0) {
+        // Check if this looks like a tab (has click handler or parent is clickable)
+        const parent = div.closest('[role="tab"], [data-log_click_for], .tab-item, .arco-tabs-tab');
+        if (parent) {
+          debugLog(' Found Shipped tab via parent element');
+          parent.click();
+          await sleep(1500);
+          return true;
+        }
+        // Try clicking the div itself
+        debugLog(' Found Shipped text, clicking...');
+        div.click();
+        await sleep(1500);
+        return true;
+      }
+    }
+
+    // Method 3: Look for tab with "Shipped" text and number pattern
+    const tabs = document.querySelectorAll('[role="tab"], .arco-tabs-tab');
+    for (const tab of tabs) {
+      if (tab.textContent?.includes('Shipped')) {
+        debugLog(' Found Shipped tab via role="tab"');
+        tab.click();
+        await sleep(1500);
+        return true;
+      }
+    }
+
+    debugLog(' Shipped tab not found, may already be on shipped orders');
+    return true; // Continue anyway
+
+  } catch (error) {
+    debugLog(' Error clicking Shipped tab:', error);
+    return false;
+  }
+}
+
+/**
+ * Select "Time shipped" option from the filter dropdown
+ * @returns {boolean} - true if Time shipped was selected
+ */
+async function selectTimeShippedFilter() {
+  debugLog(' Selecting Time shipped filter...');
+
+  try {
+    // Look for the dropdown that shows "Time created" or similar
+    // and change it to "Time shipped"
+
+    // Method 1: Find dropdown with "Time created" text and click it
+    const dropdowns = document.querySelectorAll('.arco-select, .core-select, [class*="select"], [class*="dropdown"]');
+
+    for (const dropdown of dropdowns) {
+      const text = dropdown.textContent || '';
+      if (text.includes('Time created') || text.includes('Time shipped')) {
+        debugLog(' Found time filter dropdown');
+        dropdown.click();
+        await sleep(500);
+
+        // Now find and click "Time shipped" option
+        const options = document.querySelectorAll('.arco-select-option, .core-select-option, [class*="option"], [role="option"]');
+        for (const option of options) {
+          if (option.textContent?.includes('Time shipped')) {
+            debugLog(' Clicking Time shipped option');
+            option.click();
+            await sleep(500);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Method 2: Look for any element with "Time created" text and click it
+    const allElements = document.querySelectorAll('*');
+    for (const el of allElements) {
+      // Only check leaf nodes or elements with minimal children
+      if (el.children.length <= 2 && el.textContent?.trim() === 'Time created') {
+        debugLog(' Found "Time created" text, clicking to open dropdown');
+        el.click();
+        await sleep(500);
+
+        // Find "Time shipped" option
+        const options = document.querySelectorAll('[role="option"], [class*="option"], .arco-select-option');
+        for (const option of options) {
+          if (option.textContent?.includes('Time shipped')) {
+            debugLog(' Clicking Time shipped option');
+            option.click();
+            await sleep(500);
+            return true;
+          }
+        }
+
+        // Also check for any visible "Time shipped" text that appeared
+        const timeShippedElements = document.querySelectorAll('*');
+        for (const tsEl of timeShippedElements) {
+          if (tsEl.textContent?.trim() === 'Time shipped' && tsEl !== el) {
+            debugLog(' Found Time shipped element after dropdown opened');
+            tsEl.click();
+            await sleep(500);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Method 3: Direct search for "Time shipped" option in any popup/dropdown
+    const popups = document.querySelectorAll('[role="listbox"], .arco-select-popup, .core-select-dropdown, [class*="popup"], [class*="dropdown-menu"]');
+    for (const popup of popups) {
+      const options = popup.querySelectorAll('*');
+      for (const option of options) {
+        if (option.textContent?.trim() === 'Time shipped') {
+          debugLog(' Found Time shipped in popup');
+          option.click();
+          await sleep(500);
+          return true;
+        }
+      }
+    }
+
+    debugLog(' Time shipped option not found, filter may already be set or unavailable');
+    return true; // Continue anyway
+
+  } catch (error) {
+    debugLog(' Error selecting Time shipped:', error);
+    return false;
+  }
+}
+
+/**
  * Apply date filter by clicking Filter button and setting date range
+ * IMPORTANT: Uses "Time shipped" filter, NOT "Time created"
  * @param {Object} dateFilter - { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
  * @returns {boolean} - true if filter was applied successfully
  */
@@ -291,6 +439,10 @@ async function applyDateFilter(dateFilter) {
   debugLog(' Applying date filter:', dateFilter.startDate, 'to', dateFilter.endDate);
 
   try {
+    // STEP 0: First ensure we're on the Shipped tab
+    await clickShippedTab();
+    await sleep(1000);
+
     // Step 1: Click the Filter button
     const filterButton = document.querySelector('[data-log_click_for="filter_button"]');
     if (!filterButton) {
@@ -301,6 +453,10 @@ async function applyDateFilter(dateFilter) {
     debugLog(' Clicking Filter button...');
     filterButton.click();
     await sleep(1000); // Wait for filter panel to open
+
+    // STEP 1.5: Select "Time shipped" instead of "Time created"
+    await selectTimeShippedFilter();
+    await sleep(500);
 
     // Step 2: Find the date picker inputs
     // Look for the date range picker with placeholder "From" and "To"
