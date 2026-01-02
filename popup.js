@@ -87,60 +87,48 @@ async function getCurrentShopCode() {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // Method 1: Find div/span containing "Shop Code:" text directly
+            // Method 1: Find the EXACT element containing "Shop Code:" text
             // Looking for elements like: <div class="css-14kkcet">Shop Code: MYLCV9LW9B</div>
+            // Must be a leaf element (no children with text) to avoid picking up parent containers
             const allElements = document.querySelectorAll('div, span, p');
             for (const el of allElements) {
-              const text = el.textContent || '';
-              // Check if this element contains "Shop Code:" pattern
-              if (text.includes('Shop Code:') || text.includes('Shop Code :')) {
-                // Extract the code after "Shop Code:"
-                const match = text.match(/Shop\s*Code\s*:\s*([A-Z0-9]{8,12})/i);
+              // Get ONLY direct text content of this element (not children)
+              const directText = el.childNodes.length === 1 && el.childNodes[0].nodeType === 3
+                ? el.childNodes[0].textContent.trim()
+                : el.textContent.trim();
+
+              // Must be short text containing "Shop Code:" - avoid large container divs
+              if (directText.length < 50 && (directText.includes('Shop Code:') || directText.includes('Shop Code :'))) {
+                // Extract EXACTLY 10 characters after "Shop Code:"
+                // TikTok shop codes are exactly 10 chars like MYLCV9LW9B
+                const match = directText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{10})\b/i);
                 if (match && match[1]) {
-                  console.log('[ShopCodeDetect] Found in element:', match[1]);
+                  console.log('[ShopCodeDetect] Found exact match:', match[1]);
                   return match[1].toUpperCase();
                 }
               }
             }
 
-            // Method 2: Search in full body text
+            // Method 2: Search in full body text with strict 10-char pattern
             const bodyText = document.body.innerText || '';
-            const textMatch = bodyText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{8,12})/i);
+            const textMatch = bodyText.match(/Shop\s*Code\s*:\s*([A-Z0-9]{10})\b/i);
             if (textMatch && textMatch[1]) {
               console.log('[ShopCodeDetect] Found in body text:', textMatch[1]);
               return textMatch[1].toUpperCase();
             }
 
-            // Method 3: Look for country-prefixed codes (MY, SG, TH, etc.)
-            const countryPatterns = [
-              /\b(MY[A-Z0-9]{6,10})\b/g,
-              /\b(SG[A-Z0-9]{6,10})\b/g,
-              /\b(TH[A-Z0-9]{6,10})\b/g,
-              /\b(PH[A-Z0-9]{6,10})\b/g,
-              /\b(VN[A-Z0-9]{6,10})\b/g,
-              /\b(ID[A-Z0-9]{6,10})\b/g
-            ];
-
-            for (const pattern of countryPatterns) {
-              const matches = bodyText.match(pattern);
-              if (matches && matches.length > 0) {
-                console.log('[ShopCodeDetect] Found country code:', matches[0]);
-                return matches[0].toUpperCase();
-              }
-            }
-
-            // Method 4: Look in URL params
+            // Method 3: Look in URL params
             const urlMatch = window.location.href.match(/[?&]shop_code=([A-Z0-9]+)/i);
             if (urlMatch) {
               console.log('[ShopCodeDetect] Found in URL:', urlMatch[1]);
               return urlMatch[1].toUpperCase();
             }
 
-            // Method 5: Search in script tags for JSON data
+            // Method 4: Search in script tags for JSON data
             const scripts = document.querySelectorAll('script');
             for (const script of scripts) {
               const content = script.textContent || '';
-              const jsonMatch = content.match(/["']shop_?[Cc]ode["']\s*:\s*["']([A-Z0-9]{8,12})["']/i);
+              const jsonMatch = content.match(/["']shop_?[Cc]ode["']\s*:\s*["']([A-Z0-9]{10})["']/i);
               if (jsonMatch) {
                 console.log('[ShopCodeDetect] Found in script:', jsonMatch[1]);
                 return jsonMatch[1].toUpperCase();
@@ -256,9 +244,13 @@ async function validateShopCode(shopCode) {
 
       if (newLicense) {
         // Calculate days remaining (should be 2 for new trial)
+        // Use date-only comparison to get accurate day count
         const validUntil = new Date(newLicense.valid_until);
         const now = new Date();
-        const daysRemaining = Math.ceil((validUntil - now) / (1000 * 60 * 60 * 24));
+        // Reset time to midnight for accurate day calculation
+        const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const untilMidnight = new Date(validUntil.getFullYear(), validUntil.getMonth(), validUntil.getDate());
+        const daysRemaining = Math.round((untilMidnight - todayMidnight) / (1000 * 60 * 60 * 24));
 
         return {
           valid: true,
@@ -301,8 +293,10 @@ async function validateShopCode(shopCode) {
       };
     }
 
-    // Calculate days remaining
-    const daysRemaining = Math.ceil((validUntil - now) / (1000 * 60 * 60 * 24));
+    // Calculate days remaining using date-only comparison
+    const todayMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const untilMidnight = new Date(validUntil.getFullYear(), validUntil.getMonth(), validUntil.getDate());
+    const daysRemaining = Math.round((untilMidnight - todayMidnight) / (1000 * 60 * 60 * 24));
 
     return {
       valid: true,
