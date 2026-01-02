@@ -12,3 +12,6 @@ Thumbs.db
 *.tmp
 *.temp
 node_modules/
+
+# Build output (obfuscated version goes to separate repo)
+dist/
