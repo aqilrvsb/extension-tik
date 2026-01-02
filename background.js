@@ -631,6 +631,26 @@ async function handleOrderDataExtracted(data) {
     state.currentOrderIndex++;
     state.isProcessingOrder = false;
   } else {
+    // Check if this order should skip retry (privacy blocked by TikTok)
+    const shouldSkipRetry = data && data.skipRetry === true;
+
+    if (shouldSkipRetry) {
+      // Privacy blocked - TikTok doesn't allow access, don't retry
+      log(`✗ Order ...${orderIdShort}: BLOCKED by TikTok privacy (no retry)`, 'error');
+      state.failed++;
+      state.processed++;
+      state.currentOrderIndex++;
+      state.isProcessingOrder = false;
+
+      // Save session state
+      await saveSessionState();
+
+      // Broadcast and continue to next order
+      broadcastStatus();
+      scheduleNextOrder();
+      return;
+    }
+
     // Failed - check if we should retry
     if (currentRetries < MAX_RETRIES) {
       state.retryCount[orderId] = currentRetries + 1;
@@ -1148,4 +1168,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v3.0.6');
+console.log('[Tiktok Aqil Az Exporter] Background service worker started v3.0.8');

@@ -609,15 +609,62 @@ async function applyDateFilter(dateFilter) {
     await sleep(300);
 
     // Step 10: Find and click the Apply button
-    const applyButton = document.querySelector('[data-log_click_for="apply"]');
+    // Try multiple selectors to ensure we find it
+    let applyButton = document.querySelector('[data-log_click_for="apply"]');
+
+    // Fallback: Look for button with "Apply" text in filter panel
+    if (!applyButton) {
+      const buttons = document.querySelectorAll('button.core-btn-primary');
+      for (const btn of buttons) {
+        if (btn.textContent?.includes('Apply')) {
+          applyButton = btn;
+          debugLog(' Found Apply button via button text');
+          break;
+        }
+      }
+    }
+
+    // Fallback 2: Any button with Apply text
+    if (!applyButton) {
+      const allButtons = document.querySelectorAll('button');
+      for (const btn of allButtons) {
+        if (btn.textContent?.trim() === 'Apply') {
+          applyButton = btn;
+          debugLog(' Found Apply button via text content');
+          break;
+        }
+      }
+    }
+
     if (applyButton) {
       debugLog(' Clicking Apply button...');
       applyButton.click();
       await sleep(2000); // Wait for filter to be applied
+
+      // Verify filter was applied by checking for "Found X orders" text
+      await sleep(1000);
+      const foundText = document.body.innerText.match(/Found\s+([\d,]+)\s+orders/i);
+      if (foundText) {
+        debugLog(' Filter applied! Found', foundText[1], 'orders');
+      }
+
       debugLog(' Date filter applied successfully');
       return true;
     } else {
-      debugLog(' Apply button not found');
+      debugLog(' Apply button not found - trying to click any visible Apply button');
+
+      // Last resort: Click any element with Apply text that's visible
+      const spans = document.querySelectorAll('span');
+      for (const span of spans) {
+        if (span.textContent?.trim() === 'Apply' && span.offsetParent !== null) {
+          debugLog(' Clicking Apply span');
+          span.click();
+          await sleep(2000);
+          return true;
+        }
+      }
+
+      debugLog(' Apply button still not found');
       return false;
     }
 
@@ -673,12 +720,6 @@ async function setDateInputValue(input, value) {
 async function extractOrderData(orderId) {
   debugLog(' Extracting data for order:', orderId);
 
-  // First click reveal buttons
-  await clickRevealButtons();
-
-  // Wait for data to load
-  await sleep(2000);
-
   // Extract data
   const data = {
     order_id: orderId,
@@ -695,8 +736,46 @@ async function extractOrderData(orderId) {
     sku_id: null,
     hasData: false,
     isMasked: true,
-    error: null
+    error: null,
+    privacyBlocked: false,  // New flag for privacy-blocked orders
+    skipRetry: false        // New flag to skip retry for this order
   };
+
+  // CHECK FOR PRIVACY MODAL FIRST - before clicking reveal buttons
+  // If privacy modal is already showing, this order is blocked by TikTok
+  if (isPrivacyModalPresent()) {
+    debugLog(' Privacy modal detected BEFORE reveal - order is blocked by TikTok');
+    data.error = 'Privacy blocked - TikTok restricts access to this order';
+    data.privacyBlocked = true;
+    data.skipRetry = true;  // Don't retry, TikTok won't allow access
+    data.hasData = false;
+
+    // Dismiss the modal
+    await dismissPrivacyModal();
+
+    return data;
+  }
+
+  // First click reveal buttons
+  await clickRevealButtons();
+
+  // Wait for data to load
+  await sleep(2000);
+
+  // CHECK AGAIN for privacy modal after clicking reveal buttons
+  // Sometimes the modal appears after clicking reveal
+  if (isPrivacyModalPresent()) {
+    debugLog(' Privacy modal appeared after reveal - order is blocked by TikTok');
+    data.error = 'Privacy blocked - TikTok restricts access to this order';
+    data.privacyBlocked = true;
+    data.skipRetry = true;  // Don't retry, TikTok won't allow access
+    data.hasData = false;
+
+    // Dismiss the modal
+    await dismissPrivacyModal();
+
+    return data;
+  }
 
   try {
     // Find shipping address section
@@ -829,20 +908,30 @@ function extractTextsFromContainer(container) {
 }
 
 /**
+ * Check if the privacy protection modal is showing
+ * This modal shows "To better protect our customers' privacy..."
+ * When this appears, TikTok blocks access to customer details
+ * @returns {boolean} - true if privacy modal is present
+ */
+function isPrivacyModalPresent() {
+  const modalText = document.body.innerText;
+  return modalText.includes('better protect our customers') ||
+         modalText.includes('privacy and create a healthy') ||
+         modalText.includes('Create ticket') ||
+         modalText.includes('file an appeal');
+}
+
+/**
  * Dismiss privacy protection modal if it appears
  * This modal shows "To better protect our customers' privacy..."
  *
  * IMPORTANT: Do NOT click "Cancel" - it re-masks the data!
  * Instead, click the backdrop/overlay or press Escape to dismiss without cancelling
+ *
+ * @returns {boolean} - true if modal was present and dismissed
  */
 async function dismissPrivacyModal() {
-  // Check if privacy modal is present
-  const modalText = document.body.innerText;
-  const hasPrivacyModal = modalText.includes('better protect our customers') ||
-                          modalText.includes('privacy and create a healthy') ||
-                          modalText.includes('Create ticket');
-
-  if (!hasPrivacyModal) {
+  if (!isPrivacyModalPresent()) {
     return false;
   }
 
