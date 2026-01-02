@@ -100,7 +100,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return true;
 
     case 'ORDER_IDS_COLLECTED':
-      handleOrderIdsCollected(message.orderIds);
+      handleOrderIdsCollected(message.orderIds, message.actualMaxPages);
       sendResponse({ success: true });
       return false;
 
@@ -409,12 +409,24 @@ async function collectOrderIds() {
 /**
  * Handle collected order IDs from content script
  */
-async function handleOrderIdsCollected(orderIds) {
+async function handleOrderIdsCollected(orderIds, actualMaxPages = null) {
   if (!state.isRunning || state.shouldStop) return;
 
   state.orderIds = orderIds;
   const currentPage = state.currentPage;
-  log(`Page ${currentPage}: Collected ${orderIds.length} order IDs`);
+
+  // Adjust endPage if actualMaxPages is less than user-requested endPage
+  // This handles cases where filtered results have fewer pages than expected
+  if (actualMaxPages !== null && actualMaxPages > 0) {
+    const originalEndPage = state.endPage;
+    if (actualMaxPages < state.endPage) {
+      state.endPage = actualMaxPages;
+      log(`Adjusted end page from ${originalEndPage} to ${actualMaxPages} (actual available pages)`);
+    }
+    debugLog(`Actual max pages: ${actualMaxPages}, Using end page: ${state.endPage}`);
+  }
+
+  log(`Page ${currentPage}/${state.endPage}: Collected ${orderIds.length} order IDs`);
 
   if (orderIds.length === 0) {
     // No orders on this page, check if more pages to process
@@ -451,7 +463,7 @@ async function handleOrderIdsCollected(orderIds) {
   // Start processing orders from this page
   state.phase = 'processing';
   state.currentOrderIndex = 0;
-  broadcastStatus(`Page ${currentPage}: Processing ${orderIds.length} orders...`);
+  broadcastStatus(`Page ${currentPage}/${state.endPage}: Processing ${orderIds.length} orders...`);
 
   processNextOrder();
 }
@@ -1136,4 +1148,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v3.0.4');
+console.log('[TikTok Order Exporter] Background service worker started v3.0.6');

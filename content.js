@@ -21,10 +21,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       collectOrderIds(message.pageNumber || 1, message.dateFilter).then(orderIds => {
         // Only send if we actually collected (not skipped)
         if (orderIds !== null) {
+          // Get the actual max pages from pagination AFTER filter is applied
+          const actualMaxPages = getActualMaxPages();
           chrome.runtime.sendMessage({
             type: 'ORDER_IDS_COLLECTED',
             orderIds,
-            pageNumber: message.pageNumber || 1
+            pageNumber: message.pageNumber || 1,
+            actualMaxPages: actualMaxPages // Send actual max pages to background
           });
         } else {
           debugLog('Collection was skipped, not sending result');
@@ -48,6 +51,53 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 // Flag to prevent multiple simultaneous collections
 let isCollecting = false;
 let lastCollectionTime = 0;
+
+/**
+ * Get the actual maximum page number from pagination
+ * Looks at the pagination buttons to find the highest page number
+ * @returns {number} - The maximum page number available
+ */
+function getActualMaxPages() {
+  let maxPage = 1;
+
+  // Method 1: Find pagination items with aria-label="Page X"
+  // TikTok uses: <li class="core-pagination-item" aria-label="Page 4">4</li>
+  const paginationItems = document.querySelectorAll('[aria-label^="Page "]');
+  for (const item of paginationItems) {
+    const label = item.getAttribute('aria-label');
+    const match = label?.match(/Page\s+(\d+)/);
+    if (match) {
+      const pageNum = parseInt(match[1]);
+      if (pageNum > maxPage) maxPage = pageNum;
+    }
+  }
+
+  // Method 2: Find core-pagination-item elements with numbers
+  const coreItems = document.querySelectorAll('.core-pagination-item');
+  for (const item of coreItems) {
+    const text = item.textContent?.trim();
+    const pageNum = parseInt(text);
+    if (!isNaN(pageNum) && pageNum > maxPage) {
+      maxPage = pageNum;
+    }
+  }
+
+  // Method 3: Look for any pagination number buttons
+  const paginationContainer = document.querySelector('.core-pagination, [class*="pagination"]');
+  if (paginationContainer) {
+    const buttons = paginationContainer.querySelectorAll('li, button, a, span');
+    for (const btn of buttons) {
+      const text = btn.textContent?.trim();
+      const pageNum = parseInt(text);
+      if (!isNaN(pageNum) && pageNum > maxPage && pageNum < 1000) {
+        maxPage = pageNum;
+      }
+    }
+  }
+
+  debugLog(' Detected actual max pages:', maxPage);
+  return maxPage;
+}
 
 /**
  * Get total order count from page (considers filters)
