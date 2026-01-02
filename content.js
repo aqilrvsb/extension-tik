@@ -233,7 +233,7 @@ async function collectOrderIds(pageNumber = 1, dateFilter = null) {
       await sleep(500);
     }
 
-    // Collect orders from current page only (max 20 per page)
+    // Collect orders from current page only (max 20 per page on TikTok)
     collectOrdersFromPage(orderIds, orderPattern, 20);
     debugLog(' Page', pageNumber, 'collected:', orderIds.length, 'orders');
 
