@@ -627,6 +627,56 @@
       border-radius: 3px;
       margin-left: 5px;
     }
+
+    /* License Info Section */
+    .license-info-section {
+      background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 15px;
+      border: 1px solid #a5d6a7;
+    }
+
+    .license-info-section.trial {
+      background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+      border-color: #ffd54f;
+    }
+
+    .license-info-section.expiring {
+      background: linear-gradient(135deg, #ffebee 0%, #ffcdd2 100%);
+      border-color: #ef9a9a;
+    }
+
+    .license-info-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 4px 0;
+    }
+
+    .license-info-label {
+      font-size: 11px;
+      color: #555;
+      font-weight: 500;
+    }
+
+    .license-info-value {
+      font-size: 12px;
+      font-weight: 600;
+      color: #333;
+    }
+
+    .license-info-value.pro {
+      color: #1565c0;
+    }
+
+    .license-info-value.trial {
+      color: #f57c00;
+    }
+
+    .license-info-value.warning {
+      color: #d32f2f;
+    }
   </style>
 </head>
 <body>
@@ -640,6 +690,22 @@
       <div class="status-section">
         <div class="status-icon" id="statusIcon">📦</div>
         <div class="status-text" id="statusText">Ready to export orders</div>
+      </div>
+
+      <!-- License Info Section -->
+      <div class="license-info-section" id="licenseInfoSection" style="display: none;">
+        <div class="license-info-row">
+          <span class="license-info-label">Package:</span>
+          <span class="license-info-value" id="licensePackage">-</span>
+        </div>
+        <div class="license-info-row">
+          <span class="license-info-label">Valid Until:</span>
+          <span class="license-info-value" id="licenseValidity">-</span>
+        </div>
+        <div class="license-info-row">
+          <span class="license-info-label">Days Left:</span>
+          <span class="license-info-value" id="licenseDaysLeft">-</span>
+        </div>
       </div>
 
       <!-- Progress Section - Always visible when has data -->
@@ -766,7 +832,7 @@
     </div>
 
     <div class="footer">
-      v2.9.0 - Shop Code License
+      v2.9.2 - License Info Display
     </div>
   </div>
 

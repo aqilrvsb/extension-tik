@@ -1,6 +1,6 @@
 /**
  * Popup Script for TikTok Order Exporter
- * v2.9.0 - Shop code license validation (no license key input needed)
+ * v2.9.2 - License info display with package, validity, days remaining
  */
 
 const DEBUG = false; // Set to true for verbose logging
@@ -51,6 +51,12 @@ const enableDateFilter = document.getElementById('enableDateFilter');
 const dateRangeInputs = document.getElementById('dateRangeInputs');
 const filterStartDate = document.getElementById('filterStartDate');
 const filterEndDate = document.getElementById('filterEndDate');
+
+// License info elements
+const licenseInfoSection = document.getElementById('licenseInfoSection');
+const licensePackage = document.getElementById('licensePackage');
+const licenseValidity = document.getElementById('licenseValidity');
+const licenseDaysLeft = document.getElementById('licenseDaysLeft');
 
 // State
 let isRunning = false;
@@ -174,7 +180,9 @@ async function validateShopCode(shopCode) {
       valid: true,
       license: license,
       daysRemaining: daysRemaining,
-      shopCode: license.shop_code
+      shopCode: license.shop_code,
+      packageType: license.package_type || 'PRO',
+      validUntil: license.valid_until
     };
   } catch (error) {
     console.error('License validation error:', error);
@@ -207,11 +215,81 @@ async function checkLicenseBeforeStart() {
 
   if (result.valid) {
     addLog(`License valid! ${result.daysRemaining} days remaining`, 'success');
+    // Update license info display
+    updateLicenseInfoDisplay(result);
     return true;
   } else {
     // License validation failed
     addLog(result.error, 'error');
+    hideLicenseInfoDisplay();
     return false;
+  }
+}
+
+/**
+ * Update license info display section
+ */
+function updateLicenseInfoDisplay(licenseData) {
+  if (!licenseInfoSection) return;
+
+  // Show the section
+  licenseInfoSection.style.display = 'block';
+
+  // Set package type
+  const packageType = licenseData.packageType || 'PRO';
+  licensePackage.textContent = packageType;
+  licensePackage.className = 'license-info-value ' + (packageType === 'TRIAL' ? 'trial' : 'pro');
+
+  // Set validity date
+  const validUntil = new Date(licenseData.validUntil);
+  const formattedDate = validUntil.toLocaleDateString('en-MY', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  });
+  licenseValidity.textContent = formattedDate;
+
+  // Set days remaining with warning if low
+  const daysLeft = licenseData.daysRemaining;
+  licenseDaysLeft.textContent = daysLeft + ' days';
+  if (daysLeft <= 3) {
+    licenseDaysLeft.className = 'license-info-value warning';
+    licenseInfoSection.className = 'license-info-section expiring';
+  } else if (packageType === 'TRIAL') {
+    licenseDaysLeft.className = 'license-info-value trial';
+    licenseInfoSection.className = 'license-info-section trial';
+  } else {
+    licenseDaysLeft.className = 'license-info-value pro';
+    licenseInfoSection.className = 'license-info-section';
+  }
+}
+
+/**
+ * Hide license info display
+ */
+function hideLicenseInfoDisplay() {
+  if (licenseInfoSection) {
+    licenseInfoSection.style.display = 'none';
+  }
+}
+
+/**
+ * Check and display license info on popup open
+ */
+async function checkAndDisplayLicenseInfo() {
+  const currentShopCode = await getCurrentShopCode();
+
+  if (!currentShopCode) {
+    hideLicenseInfoDisplay();
+    return;
+  }
+
+  const result = await validateShopCode(currentShopCode);
+
+  if (result.valid) {
+    updateLicenseInfoDisplay(result);
+  } else {
+    hideLicenseInfoDisplay();
   }
 }
 
@@ -247,6 +325,9 @@ async function init() {
 
   // Load storage count
   await updateStorageCount();
+
+  // Check and display license info on popup open
+  await checkAndDisplayLicenseInfo();
 
   // Check for previous session state
   await checkPreviousSession();
