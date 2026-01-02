@@ -1136,4 +1136,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v3.0.3');
+console.log('[TikTok Order Exporter] Background service worker started v3.0.4');

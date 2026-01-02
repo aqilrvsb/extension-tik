@@ -580,41 +580,61 @@ function extractTextsFromContainer(container) {
 /**
  * Dismiss privacy protection modal if it appears
  * This modal shows "To better protect our customers' privacy..."
- * We click "Cancel" to dismiss it
+ *
+ * IMPORTANT: Do NOT click "Cancel" - it re-masks the data!
+ * Instead, click the backdrop/overlay or press Escape to dismiss without cancelling
  */
 async function dismissPrivacyModal() {
-  // Look for the modal with "Cancel" button
-  const cancelButtons = document.querySelectorAll('button');
-  for (const btn of cancelButtons) {
-    const text = btn.textContent?.trim();
-    if (text === 'Cancel' || text === 'cancel') {
-      // Check if this is inside a modal (parent has overlay/modal class or fixed position)
-      const parent = btn.closest('[class*="modal"], [class*="dialog"], [class*="overlay"], [role="dialog"]');
-      if (parent || btn.closest('div[style*="position: fixed"]')) {
-        debugLog(' Found privacy modal, clicking Cancel...');
-        btn.click();
-        await sleep(300);
-        return true;
-      }
-    }
-  }
-
-  // Alternative: Look for modal by its content
+  // Check if privacy modal is present
   const modalText = document.body.innerText;
-  if (modalText.includes('better protect our customers') || modalText.includes('privacy and create a healthy')) {
-    // Find and click Cancel button
-    const allButtons = document.querySelectorAll('button, [role="button"]');
-    for (const btn of allButtons) {
-      if (btn.textContent?.trim() === 'Cancel') {
-        debugLog(' Dismissing privacy modal via text match...');
-        btn.click();
-        await sleep(300);
-        return true;
-      }
+  const hasPrivacyModal = modalText.includes('better protect our customers') ||
+                          modalText.includes('privacy and create a healthy') ||
+                          modalText.includes('Create ticket');
+
+  if (!hasPrivacyModal) {
+    return false;
+  }
+
+  debugLog(' Privacy modal detected, dismissing without Cancel...');
+
+  // Method 1: Press Escape key to close modal (keeps data unmasked)
+  document.dispatchEvent(new KeyboardEvent('keydown', {
+    key: 'Escape',
+    code: 'Escape',
+    keyCode: 27,
+    which: 27,
+    bubbles: true
+  }));
+  await sleep(300);
+
+  // Method 2: Click the backdrop/overlay (the dark area behind modal)
+  const overlays = document.querySelectorAll('[class*="overlay"], [class*="mask"], [class*="backdrop"]');
+  for (const overlay of overlays) {
+    const style = window.getComputedStyle(overlay);
+    if (style.position === 'fixed' && style.zIndex) {
+      debugLog(' Clicking overlay backdrop...');
+      overlay.click();
+      await sleep(300);
+      break;
     }
   }
 
-  return false;
+  // Method 3: Click outside modal area (top-left corner)
+  document.body.click();
+  await sleep(200);
+
+  // Method 4: Find and click close button (X icon) if exists
+  const closeButtons = document.querySelectorAll('[class*="close"], [aria-label="Close"], [aria-label="close"]');
+  for (const btn of closeButtons) {
+    if (btn.closest('[class*="modal"], [class*="dialog"], [role="dialog"]')) {
+      debugLog(' Clicking close X button...');
+      btn.click();
+      await sleep(300);
+      return true;
+    }
+  }
+
+  return true;
 }
 
 /**
