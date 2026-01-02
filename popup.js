@@ -29,12 +29,13 @@ const skippedCount = document.getElementById('skippedCount');
 const remainingCount = document.getElementById('remainingCount');
 const startBtn = document.getElementById('startBtn');
 const runningBtns = document.getElementById('runningBtns');
+const pauseBtn = document.getElementById('pauseBtn');
 const stopBtn = document.getElementById('stopBtn');
 const downloadCsvBtn = document.getElementById('downloadCsvBtn');
 const downloadXlsxBtn = document.getElementById('downloadXlsxBtn');
-const maxOrdersInput = document.getElementById('maxOrders');
-const delayMinInput = document.getElementById('delayMin');
-const delayMaxInput = document.getElementById('delayMax');
+const pausedBtns = document.getElementById('pausedBtns');
+const resumePausedBtn = document.getElementById('resumePausedBtn');
+const stopPausedBtn = document.getElementById('stopPausedBtn');
 const logSection = document.getElementById('logSection');
 const historySection = document.getElementById('historySection');
 const historyInfo = document.getElementById('historyInfo');
@@ -46,11 +47,12 @@ const storageCount = document.getElementById('storageCount');
 const clearStorageBtn = document.getElementById('clearStorageBtn');
 const openDashboardBtn = document.getElementById('openDashboardBtn');
 
-// Date filter elements
-const enableDateFilter = document.getElementById('enableDateFilter');
-const dateRangeInputs = document.getElementById('dateRangeInputs');
-const filterStartDate = document.getElementById('filterStartDate');
-const filterEndDate = document.getElementById('filterEndDate');
+// Date filter element (single date)
+const filterDateInput = document.getElementById('filterDate');
+
+// Page range elements
+const startPageInput = document.getElementById('startPage');
+const endPageInput = document.getElementById('endPage');
 
 // License info elements
 const licenseInfoSection = document.getElementById('licenseInfoSection');
@@ -65,6 +67,11 @@ let exportStartTime = null; // Track when export started for time estimation
 // Time estimate elements
 const timeEstimate = document.getElementById('timeEstimate');
 const timeRemaining = document.getElementById('timeRemaining');
+
+// Page and Order progress elements
+const pageOrderProgress = document.getElementById('pageOrderProgress');
+const pageProgress = document.getElementById('pageProgress');
+const orderProgress = document.getElementById('orderProgress');
 
 // ========================================
 // LICENSE VALIDATION FUNCTIONS
@@ -458,27 +465,18 @@ async function checkAndDisplayLicenseInfo() {
 // Initialize on popup open
 async function init() {
   // Load saved settings
-  const settings = await chrome.storage.local.get(['maxOrders', 'delayMin', 'delayMax', 'enableDateFilter', 'filterStartDate', 'filterEndDate']);
-  if (settings.maxOrders) maxOrdersInput.value = settings.maxOrders;
-  if (settings.delayMin) delayMinInput.value = settings.delayMin;
-  if (settings.delayMax) delayMaxInput.value = settings.delayMax;
+  const settings = await chrome.storage.local.get(['filterDate', 'startPage', 'endPage']);
 
-  // Load date filter settings
-  if (settings.enableDateFilter) {
-    enableDateFilter.checked = true;
-    dateRangeInputs.style.display = 'block';
-  }
-  if (settings.filterStartDate) filterStartDate.value = settings.filterStartDate;
-  if (settings.filterEndDate) filterEndDate.value = settings.filterEndDate;
+  // Load page range settings
+  if (settings.startPage) startPageInput.value = settings.startPage;
+  if (settings.endPage) endPageInput.value = settings.endPage;
 
-  // Set default dates if not set (last 30 days)
-  if (!filterStartDate.value) {
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    filterStartDate.value = thirtyDaysAgo.toISOString().split('T')[0];
-  }
-  if (!filterEndDate.value) {
-    filterEndDate.value = new Date().toISOString().split('T')[0];
+  // Load date filter setting
+  if (settings.filterDate) {
+    filterDateInput.value = settings.filterDate;
+  } else {
+    // Default to today
+    filterDateInput.value = new Date().toISOString().split('T')[0];
   }
 
   // Load storage count
@@ -507,12 +505,32 @@ async function updateStorageCount() {
 
 // Check for previous interrupted session and auto-resume
 // Note: Force stop (button click) clears session, so this only triggers for natural interruptions
+// Note: Paused by human does NOT auto-resume - user must manually resume
 async function checkPreviousSession() {
   const sessionData = await chrome.storage.local.get(['sessionState']);
   const session = sessionData.sessionState;
 
   if (session && session.orderIds && session.orderIds.length > 0 && session.currentOrderIndex < session.orderIds.length) {
-    // There's an interrupted session (natural interruption, not force stop)
+    // Check if paused by human - do NOT auto-resume
+    if (session.pausedByHuman) {
+      const remaining = session.orderIds.length - session.currentOrderIndex;
+      debugLog(' Found paused session (by user), showing manual resume...');
+
+      // Show paused state with resume button
+      statusIcon.textContent = '⏸️';
+      statusText.textContent = `Paused: ${remaining} orders remaining`;
+      setRunningState(false, true); // Show paused buttons
+
+      // Update stats
+      statsGrid.style.display = 'grid';
+      successCount.textContent = session.success || 0;
+      failedCount.textContent = session.failed || 0;
+      skippedCount.textContent = session.skipped || 0;
+      remainingCount.textContent = remaining;
+      return;
+    }
+
+    // There's an interrupted session (natural interruption, not force stop or pause)
     // AUTO RESUME since force stop clears session state
     const remaining = session.orderIds.length - session.currentOrderIndex;
     const success = session.success || 0;
@@ -536,8 +554,9 @@ async function checkPreviousSession() {
 
 // Auto-resume function
 function autoResume() {
-  const delayMin = parseFloat(delayMinInput.value) || 2;
-  const delayMax = parseFloat(delayMaxInput.value) || 6;
+  // Delay values (2-7 seconds)
+  const delayMin = 2;
+  const delayMax = 7;
 
   chrome.runtime.sendMessage({
     type: 'RESUME_EXPORT',
@@ -558,45 +577,28 @@ function autoResume() {
   });
 }
 
-// Save settings on change
-maxOrdersInput.addEventListener('change', () => {
-  chrome.storage.local.set({ maxOrders: parseInt(maxOrdersInput.value) });
+// Date filter input
+filterDateInput.addEventListener('change', () => {
+  chrome.storage.local.set({ filterDate: filterDateInput.value });
 });
 
-delayMinInput.addEventListener('change', () => {
-  let min = parseFloat(delayMinInput.value);
-  let max = parseFloat(delayMaxInput.value);
-  if (min > max) {
-    delayMaxInput.value = min;
-    max = min;
+// Page range inputs
+startPageInput.addEventListener('change', () => {
+  let start = parseInt(startPageInput.value) || 1;
+  let end = parseInt(endPageInput.value) || 1;
+  if (start > end) {
+    endPageInput.value = start;
   }
-  chrome.storage.local.set({ delayMin: min, delayMax: max });
+  chrome.storage.local.set({ startPage: start, endPage: parseInt(endPageInput.value) });
 });
 
-delayMaxInput.addEventListener('change', () => {
-  let min = parseFloat(delayMinInput.value);
-  let max = parseFloat(delayMaxInput.value);
-  if (max < min) {
-    delayMinInput.value = max;
-    min = max;
+endPageInput.addEventListener('change', () => {
+  let start = parseInt(startPageInput.value) || 1;
+  let end = parseInt(endPageInput.value) || 1;
+  if (end < start) {
+    startPageInput.value = end;
   }
-  chrome.storage.local.set({ delayMin: min, delayMax: max });
-});
-
-// Date filter toggle
-enableDateFilter.addEventListener('change', () => {
-  const enabled = enableDateFilter.checked;
-  dateRangeInputs.style.display = enabled ? 'block' : 'none';
-  chrome.storage.local.set({ enableDateFilter: enabled });
-});
-
-// Date filter inputs
-filterStartDate.addEventListener('change', () => {
-  chrome.storage.local.set({ filterStartDate: filterStartDate.value });
-});
-
-filterEndDate.addEventListener('change', () => {
-  chrome.storage.local.set({ filterEndDate: filterEndDate.value });
+  chrome.storage.local.set({ startPage: parseInt(startPageInput.value), endPage: end });
 });
 
 // Sound effects using Web Audio API
@@ -654,20 +656,19 @@ chrome.runtime.onMessage.addListener((message) => {
 
 // Start button click
 startBtn.addEventListener('click', async () => {
-  // REQUIRE date filter to be enabled
-  if (!enableDateFilter.checked) {
-    addLog('Date filter is required! Please enable it and select date range.', 'error');
-    // Highlight the date filter checkbox
-    enableDateFilter.parentElement.style.animation = 'shake 0.5s';
-    setTimeout(() => {
-      enableDateFilter.parentElement.style.animation = '';
-    }, 500);
+  // Validate date is set
+  if (!filterDateInput.value) {
+    addLog('Please select a date.', 'error');
+    filterDateInput.style.borderColor = 'red';
+    setTimeout(() => { filterDateInput.style.borderColor = ''; }, 2000);
     return;
   }
 
-  // Validate date range is set
-  if (!filterStartDate.value || !filterEndDate.value) {
-    addLog('Please select both start and end dates.', 'error');
+  // Validate page range
+  const startPage = parseInt(startPageInput.value) || 1;
+  const endPage = parseInt(endPageInput.value) || 1;
+  if (startPage > endPage) {
+    addLog('Start page cannot be greater than end page.', 'error');
     return;
   }
 
@@ -685,26 +686,34 @@ startBtn.addEventListener('click', async () => {
 
 // Actual start export function
 function startExport() {
-  const maxOrders = parseInt(maxOrdersInput.value) || 100;
-  const delayMin = parseFloat(delayMinInput.value) || 2;
-  const delayMax = parseFloat(delayMaxInput.value) || 6;
+  const startPage = parseInt(startPageInput.value) || 1;
+  const endPage = parseInt(endPageInput.value) || 1;
+  const filterDate = filterDateInput.value;
 
-  // Build message with optional date filter
+  // Delay values (2-7 seconds)
+  const delayMin = 2;
+  const delayMax = 7;
+
+  // Save settings
+  chrome.storage.local.set({
+    filterDate,
+    startPage,
+    endPage
+  });
+
+  // Build message with page range and date
   const message = {
     type: 'START_EXPORT',
-    maxOrders,
+    startPage,
+    endPage,
     delayMinMs: delayMin * 1000,
-    delayMaxMs: delayMax * 1000
+    delayMaxMs: delayMax * 1000,
+    dateFilter: {
+      date: filterDate // Single date format: YYYY-MM-DD
+    }
   };
 
-  // Add date filter if enabled
-  if (enableDateFilter.checked && filterStartDate.value && filterEndDate.value) {
-    message.dateFilter = {
-      startDate: filterStartDate.value, // Format: YYYY-MM-DD
-      endDate: filterEndDate.value
-    };
-    addLog(`Date filter: ${filterStartDate.value} to ${filterEndDate.value}`, 'info');
-  }
+  addLog(`Date: ${filterDate}, Pages: ${startPage}-${endPage}`, 'info');
 
   // Send start command to background
   chrome.runtime.sendMessage(message, (response) => {
@@ -720,8 +729,9 @@ function startExport() {
 
 // Resume button click
 resumeBtn.addEventListener('click', async () => {
-  const delayMin = parseFloat(delayMinInput.value) || 2;
-  const delayMax = parseFloat(delayMaxInput.value) || 6;
+  // Delay values (2-7 seconds)
+  const delayMin = 2;
+  const delayMax = 7;
 
   chrome.runtime.sendMessage({
     type: 'RESUME_EXPORT',
@@ -738,10 +748,41 @@ resumeBtn.addEventListener('click', async () => {
   });
 });
 
+// Pause button click
+pauseBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'PAUSE_EXPORT' }, (response) => {
+    if (response && response.paused) {
+      addLog('Export paused by user', 'warn');
+      setRunningState(false, true); // Show paused state
+    }
+  });
+});
+
 // Stop button click
 stopBtn.addEventListener('click', () => {
   chrome.runtime.sendMessage({ type: 'STOP_EXPORT' }, (response) => {
     addLog('Export stopped by user', 'info');
+    setRunningState(false);
+  });
+});
+
+// Resume from paused state
+resumePausedBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'RESUME_PAUSED' }, (response) => {
+    if (response && response.success) {
+      addLog('Resuming export...', 'info');
+      setRunningState(true);
+    } else if (response && response.error) {
+      addLog('Resume error: ' + response.error, 'error');
+    }
+  });
+});
+
+// Stop from paused state
+stopPausedBtn.addEventListener('click', () => {
+  chrome.runtime.sendMessage({ type: 'STOP_EXPORT' }, (response) => {
+    addLog('Export stopped by user', 'info');
+    setRunningState(false);
   });
 });
 
@@ -838,6 +879,37 @@ function updateUI(status) {
   // Always show progress and stats if we have data
   const hasData = status.total > 0 || status.success > 0 || status.failed > 0;
 
+  // Check for paused state
+  if (status.isPaused) {
+    setRunningState(false, true); // Paused state
+    statusIcon.textContent = '⏸️';
+    statusText.textContent = status.message || 'Export paused';
+    statusText.classList.remove('running');
+
+    // Show progress while paused
+    if (hasData) {
+      progressSection.classList.add('show');
+      const totalProcessed = status.processed + status.skipped;
+      const percent = status.total > 0 ? Math.round((totalProcessed / status.total) * 100) : 0;
+      progressFill.style.width = percent + '%';
+      progressText.textContent = `${totalProcessed} / ${status.total} orders`;
+      progressPercent.textContent = percent + '%';
+
+      // Update Page and Order progress display
+      if (pageProgress && orderProgress) {
+        pageProgress.textContent = `${status.currentPage || 1}/${status.totalPages || 1}`;
+        orderProgress.textContent = `${status.currentOrderInPage || 0}/${status.ordersInPage || 0}`;
+      }
+
+      statsGrid.style.display = 'grid';
+      successCount.textContent = status.success || 0;
+      failedCount.textContent = status.failed || 0;
+      skippedCount.textContent = status.skipped || 0;
+      remainingCount.textContent = status.remaining || 0;
+    }
+    return;
+  }
+
   if (status.isRunning) {
     setRunningState(true);
     statusIcon.textContent = '⏳';
@@ -856,6 +928,12 @@ function updateUI(status) {
     progressFill.style.width = percent + '%';
     progressText.textContent = `${totalProcessed} / ${status.total} orders`;
     progressPercent.textContent = percent + '%';
+
+    // Update Page and Order progress display
+    if (pageProgress && orderProgress) {
+      pageProgress.textContent = `${status.currentPage || 1}/${status.totalPages || 1}`;
+      orderProgress.textContent = `${status.currentOrderInPage || 0}/${status.ordersInPage || 0}`;
+    }
 
     // Show time estimate
     const estimate = calculateTimeEstimate(totalProcessed, status.total, status.remaining);
@@ -926,19 +1004,31 @@ function updateUI(status) {
   updateStorageCount();
 }
 
-// Set running/stopped state
-function setRunningState(running) {
+// Set running/stopped/paused state
+function setRunningState(running, paused = false) {
   isRunning = running;
 
-  if (running) {
+  if (paused) {
+    // Paused state - show resume/stop buttons
+    startBtn.style.display = 'none';
+    runningBtns.style.display = 'none';
+    pausedBtns.style.display = 'flex';
+    historySection.classList.remove('show');
+    settingsSection.style.display = 'none';
+    logSection.classList.add('show');
+  } else if (running) {
+    // Running state
     startBtn.style.display = 'none';
     runningBtns.style.display = 'flex';
+    pausedBtns.style.display = 'none';
     historySection.classList.remove('show');
     settingsSection.style.display = 'none';
     logSection.classList.add('show');
   } else {
+    // Stopped state
     startBtn.style.display = 'block';
     runningBtns.style.display = 'none';
+    pausedBtns.style.display = 'none';
     settingsSection.style.display = 'block';
   }
 }

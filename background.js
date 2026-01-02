@@ -34,10 +34,12 @@ let orderStartTime = null;
 let state = {
   isRunning: false,
   shouldStop: false,
+  isPaused: false, // New: pause state (human-initiated, no auto-resume)
+  pausedByHuman: false, // New: track if paused by user
   currentTabId: null,
   maxOrders: 100,
   delayMinMs: 2000,
-  delayMaxMs: 6000,
+  delayMaxMs: 7000,
   orderIds: [],
   collectedData: [],
   existingOrderIds: [],
@@ -48,7 +50,7 @@ let state = {
   skipped: 0,
   totalAmount: 0,
   isProcessingOrder: false,
-  phase: 'idle', // idle, collecting, processing, done
+  phase: 'idle', // idle, collecting, processing, done, paused
   retryCount: {}, // Track retry attempts per order: { orderId: attemptCount }
   retried: 0, // Count of orders that succeeded after retry
   dateFilter: null // Optional date filter: { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
@@ -65,6 +67,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     case 'RESUME_EXPORT':
       handleResume(message).then(sendResponse);
+      return true;
+
+    case 'PAUSE_EXPORT':
+      handlePause();
+      sendResponse({ paused: true });
+      return false;
+
+    case 'RESUME_PAUSED':
+      handleResumePaused().then(sendResponse);
       return true;
 
     case 'STOP_EXPORT':
@@ -148,7 +159,9 @@ async function handleStart(message) {
     isRunning: true,
     shouldStop: false,
     currentTabId: null,
-    maxOrders: message.maxOrders || 100,
+    startPage: message.startPage || 1,
+    endPage: message.endPage || 1,
+    currentPage: message.startPage || 1, // Track current page being processed
     delayMinMs: message.delayMinMs || 2000,
     delayMaxMs: message.delayMaxMs || 6000,
     orderIds: [],
@@ -164,12 +177,12 @@ async function handleStart(message) {
     phase: 'collecting',
     retryCount: {},
     retried: 0,
-    dateFilter: message.dateFilter || null // Store date filter
+    dateFilter: message.dateFilter || null // Store date filter (single date)
   };
 
   // Log date filter if present
   if (state.dateFilter) {
-    log(`Date filter: ${state.dateFilter.startDate} to ${state.dateFilter.endDate}`);
+    log(`Date: ${state.dateFilter.date}, Pages: ${state.startPage}-${state.endPage}`);
   }
 
   // Clear previous session
@@ -274,11 +287,52 @@ async function handleResume(message) {
 }
 
 /**
+ * Handle pause command (HUMAN PAUSE - no auto-resume)
+ */
+function handlePause() {
+  state.isPaused = true;
+  state.pausedByHuman = true;
+  state.isRunning = false;
+
+  // Stop watchdog timer
+  stopOrderWatchdog();
+
+  // Save session state (but mark as paused by human)
+  saveSessionState();
+
+  broadcastStatus('Export paused by user', false, false, false, null, true);
+  log('Export paused by user - manual resume required');
+}
+
+/**
+ * Handle resume from paused state
+ */
+async function handleResumePaused() {
+  if (!state.isPaused) {
+    return { error: 'Not paused' };
+  }
+
+  state.isPaused = false;
+  state.pausedByHuman = false;
+  state.isRunning = true;
+
+  broadcastStatus('Resuming export...');
+  log('Resuming from pause...');
+
+  // Continue processing
+  processNextOrder();
+
+  return { success: true };
+}
+
+/**
  * Handle stop command (FORCE STOP - no auto-resume)
  */
 async function handleStop() {
   state.shouldStop = true;
   state.isRunning = false;
+  state.isPaused = false;
+  state.pausedByHuman = false;
 
   // Stop watchdog timer
   stopOrderWatchdog();
@@ -307,6 +361,7 @@ async function saveSessionState() {
         totalAmount: state.totalAmount,
         retryCount: state.retryCount,
         retried: state.retried,
+        pausedByHuman: state.pausedByHuman, // Track if paused by user
         savedAt: new Date().toISOString()
       }
     });
@@ -328,21 +383,20 @@ async function clearSessionState() {
 async function collectOrderIds() {
   if (!state.isRunning || state.shouldStop) return;
 
-  log('Collecting order IDs from list page...');
-  broadcastStatus('Collecting order IDs...');
+  const currentPage = state.currentPage || state.startPage;
+  log(`Collecting order IDs from page ${currentPage}...`);
+  broadcastStatus(`Collecting orders from page ${currentPage}...`);
 
   try {
-    // Build message with optional date filter
+    // Build message with page number and date filter
     const message = {
       type: 'COLLECT_ORDER_IDS',
-      maxOrders: state.maxOrders
+      pageNumber: currentPage,
+      dateFilter: state.dateFilter
     };
 
-    // Add date filter if present
     if (state.dateFilter) {
-      message.dateFilter = state.dateFilter;
-      log(`Applying date filter: ${state.dateFilter.startDate} to ${state.dateFilter.endDate}`);
-      broadcastStatus('Applying date filter...');
+      log(`Date: ${state.dateFilter.date}, Page: ${currentPage}`);
     }
 
     await chrome.tabs.sendMessage(state.currentTabId, message);
@@ -359,24 +413,45 @@ async function handleOrderIdsCollected(orderIds) {
   if (!state.isRunning || state.shouldStop) return;
 
   state.orderIds = orderIds;
-  log(`Collected ${orderIds.length} order IDs`);
+  const currentPage = state.currentPage;
+  log(`Page ${currentPage}: Collected ${orderIds.length} order IDs`);
 
   if (orderIds.length === 0) {
-    log('No orders found!', 'error');
+    // No orders on this page, check if more pages to process
+    if (currentPage < state.endPage) {
+      log(`Page ${currentPage} empty, moving to next page...`);
+      state.currentPage++;
+      state.phase = 'collecting';
+      collectCalled = false;
+
+      // Navigate to order list page to collect next page
+      setTimeout(async () => {
+        if (state.isRunning && !state.shouldStop) {
+          await chrome.tabs.update(state.currentTabId, {
+            url: 'https://seller-my.tiktok.com/order?selected_sort=6&tab=shipped'
+          });
+        }
+      }, 1000);
+      return;
+    }
+
+    // All pages done
+    log('No more orders found!');
     state.isRunning = false;
     state.phase = 'done';
     await clearSessionState();
-    broadcastStatus('No orders found', false, false, true);
+    broadcastStatus('Export completed!', false, false, true);
+    showCompletionNotification(state.success, state.failed, state.skipped, state.retried);
     return;
   }
 
   // Save session state
   await saveSessionState();
 
-  // Start processing orders
+  // Start processing orders from this page
   state.phase = 'processing';
   state.currentOrderIndex = 0;
-  broadcastStatus(`Processing ${orderIds.length} orders...`);
+  broadcastStatus(`Page ${currentPage}: Processing ${orderIds.length} orders...`);
 
   processNextOrder();
 }
@@ -406,8 +481,31 @@ async function processNextOrder() {
   }
 
   if (state.currentOrderIndex >= state.orderIds.length) {
-    // All done!
+    // Current page done - save data first
     stopOrderWatchdog();
+    await saveToStorage();
+
+    // Check if more pages to process
+    if (state.currentPage < state.endPage) {
+      log(`Page ${state.currentPage} completed! Moving to page ${state.currentPage + 1}...`);
+      state.currentPage++;
+      state.orderIds = [];
+      state.currentOrderIndex = 0;
+      state.phase = 'collecting';
+      collectCalled = false;
+
+      // Navigate back to order list to collect next page
+      setTimeout(async () => {
+        if (state.isRunning && !state.shouldStop) {
+          await chrome.tabs.update(state.currentTabId, {
+            url: 'https://seller-my.tiktok.com/order?selected_sort=6&tab=shipped'
+          });
+        }
+      }, 1500);
+      return;
+    }
+
+    // All pages done!
     state.isRunning = false;
     state.phase = 'done';
     const retriedMsg = state.retried > 0 ? `, ${state.retried} recovered by retry` : '';
@@ -417,8 +515,6 @@ async function processNextOrder() {
     // Show desktop notification
     showCompletionNotification(state.success, state.failed, state.skipped, state.retried);
 
-    // Save collected data and clear session
-    await saveToStorage();
     await clearSessionState();
     return;
   }
@@ -497,6 +593,7 @@ async function handleOrderDataExtracted(data) {
 
     state.success++;
     state.collectedData.push({
+      page: state.currentPage || 1, // Add page number as first column
       order_id: orderId,
       shipping_method: data.shipping_method || '',
       payment_method: data.payment_method || '',
@@ -553,7 +650,14 @@ async function handleOrderDataExtracted(data) {
 
   broadcastStatus();
 
-  // Random delay between min and max
+  // Check if we need a rest break (human-like behavior)
+  const restBreak = checkRestBreak();
+  if (restBreak > 0) {
+    setTimeout(() => processNextOrder(), restBreak);
+    return;
+  }
+
+  // Random delay between min and max (with occasional longer pauses)
   const delay = getRandomDelay();
   log(`Waiting ${(delay / 1000).toFixed(1)}s before next order...`, 'info');
   setTimeout(() => processNextOrder(), delay);
@@ -585,10 +689,47 @@ async function retryCurrentOrder() {
 }
 
 /**
- * Get random delay between min and max
+ * Get random delay between min and max with human-like variation
+ * Adds occasional longer pauses to simulate human behavior
  */
 function getRandomDelay() {
-  return state.delayMinMs + Math.random() * (state.delayMaxMs - state.delayMinMs);
+  const baseDelay = state.delayMinMs + Math.random() * (state.delayMaxMs - state.delayMinMs);
+
+  // 15% chance of a "thinking" pause (add 2-5 extra seconds)
+  if (Math.random() < 0.15) {
+    const thinkingPause = 2000 + Math.random() * 3000;
+    debugLog('Adding thinking pause:', (thinkingPause / 1000).toFixed(1), 's');
+    return baseDelay + thinkingPause;
+  }
+
+  // 5% chance of a "distraction" pause (add 8-15 extra seconds)
+  if (Math.random() < 0.05) {
+    const distractionPause = 8000 + Math.random() * 7000;
+    debugLog('Adding distraction pause:', (distractionPause / 1000).toFixed(1), 's');
+    return baseDelay + distractionPause;
+  }
+
+  return baseDelay;
+}
+
+/**
+ * Check if we need a rest break (every 20-25 orders)
+ * Returns delay in ms if break needed, 0 otherwise
+ */
+function checkRestBreak() {
+  const ordersProcessed = state.success + state.failed;
+
+  // Random interval between 20-25 orders
+  const breakInterval = 20 + Math.floor(Math.random() * 6);
+
+  if (ordersProcessed > 0 && ordersProcessed % breakInterval === 0) {
+    // Take a 10-20 second break
+    const breakDuration = 10000 + Math.random() * 10000;
+    log(`Short break... (${Math.round(breakDuration / 1000)}s)`, 'info');
+    return breakDuration;
+  }
+
+  return 0;
 }
 
 /**
@@ -707,6 +848,7 @@ async function saveExportHistory(format, count, filename) {
  */
 function getExportHeaders() {
   return [
+    'Page',
     'Order ID',
     'Shipping Method',
     'Payment Method',
@@ -725,6 +867,7 @@ function getExportHeaders() {
  */
 function getExportRows(orders) {
   return orders.map(row => [
+    row.page || 1,
     row.order_id || '',
     row.shipping_method || '',
     row.payment_method || '',
@@ -815,6 +958,7 @@ async function downloadXLSX() {
 
     // Set column widths for better readability
     ws['!cols'] = [
+      { wch: 6 },   // Page
       { wch: 20 },  // Order ID
       { wch: 15 },  // Shipping Method
       { wch: 15 },  // Payment Method
@@ -865,6 +1009,8 @@ function getStatus() {
   const currentRetry = currentOrderId ? (state.retryCount[currentOrderId] || 0) : 0;
   return {
     isRunning: state.isRunning,
+    isPaused: state.isPaused,
+    pausedByHuman: state.pausedByHuman,
     phase: state.phase,
     total: state.orderIds.length,
     processed: state.processed,
@@ -878,20 +1024,28 @@ function getStatus() {
     currentOrderId: currentOrderId,
     currentRetry: currentRetry,
     stopped: state.shouldStop && !state.isRunning,
-    completed: state.phase === 'done' && !state.isRunning
+    completed: state.phase === 'done' && !state.isRunning,
+    // Page progress info
+    currentPage: state.currentPage || 1,
+    totalPages: state.endPage || 1,
+    startPage: state.startPage || 1,
+    // Current order index within page (1-based)
+    currentOrderInPage: state.currentOrderIndex + 1,
+    ordersInPage: state.orderIds.length
   };
 }
 
 /**
  * Broadcast status to popup
  */
-function broadcastStatus(message = null, running = null, stopped = false, completed = false, currentOrderId = null) {
+function broadcastStatus(message = null, running = null, stopped = false, completed = false, currentOrderId = null, paused = false) {
   const status = getStatus();
   if (message) status.message = message;
   if (running !== null) status.isRunning = running;
   if (stopped) status.stopped = true;
   if (completed) status.completed = true;
   if (currentOrderId) status.currentOrderId = currentOrderId;
+  if (paused) status.isPaused = true;
 
   chrome.runtime.sendMessage({ type: 'STATUS_UPDATE', ...status }).catch(() => {});
 }
@@ -982,4 +1136,4 @@ function showCompletionNotification(success, failed, skipped, retried = 0) {
 }
 
 // Log service worker start
-console.log('[TikTok Order Exporter] Background service worker started v2.9.1');
+console.log('[TikTok Order Exporter] Background service worker started v3.0.3');

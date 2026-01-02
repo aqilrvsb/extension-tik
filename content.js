@@ -18,12 +18,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   switch (message.type) {
     case 'COLLECT_ORDER_IDS':
-      collectOrderIds(message.maxOrders, message.dateFilter).then(orderIds => {
+      collectOrderIds(message.pageNumber || 1, message.dateFilter).then(orderIds => {
         // Only send if we actually collected (not skipped)
         if (orderIds !== null) {
           chrome.runtime.sendMessage({
             type: 'ORDER_IDS_COLLECTED',
-            orderIds
+            orderIds,
+            pageNumber: message.pageNumber || 1
           });
         } else {
           debugLog('Collection was skipped, not sending result');
@@ -105,12 +106,11 @@ function getShippedCount() {
 }
 
 /**
- * Collect order IDs from the shipped orders list page
- * With pagination - 20 orders per page, clicks through pages
- * @param {number} maxOrders - Maximum orders to collect
- * @param {Object} dateFilter - Optional date filter { startDate: 'YYYY-MM-DD', endDate: 'YYYY-MM-DD' }
+ * Collect order IDs from a SINGLE page of the shipped orders list
+ * @param {number} pageNumber - The page number to collect from
+ * @param {Object} dateFilter - Date filter { date: 'YYYY-MM-DD' } (single date)
  */
-async function collectOrderIds(maxOrders = 100, dateFilter = null) {
+async function collectOrderIds(pageNumber = 1, dateFilter = null) {
   const now = Date.now();
 
   // Prevent multiple simultaneous calls (with 5 second cooldown)
@@ -129,9 +129,9 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
   lastCollectionTime = now;
 
   debugLog(' ========================================');
-  debugLog(' Starting order collection, max:', maxOrders);
-  if (dateFilter) {
-    debugLog(' Date filter:', dateFilter.startDate, 'to', dateFilter.endDate);
+  debugLog(' Collecting from page:', pageNumber);
+  if (dateFilter && dateFilter.date) {
+    debugLog(' Date filter:', dateFilter.date);
   }
   debugLog(' ========================================');
 
@@ -139,8 +139,9 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
   const orderPattern = /5\d{16,18}/g;
 
   try {
-    // Wait for page to fully load
-    await sleep(2000);
+    // Wait for page to fully load (increased to 10 seconds to prevent skipping)
+    debugLog(' Waiting 10 seconds for page to fully load...');
+    await sleep(10000);
 
     // Check if we're on the right page
     if (!window.location.href.includes('/order')) {
@@ -148,104 +149,54 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
       return [];
     }
 
-    // Apply date filter if provided
-    let isFilterActive = false;
-    if (dateFilter) {
-      const filterApplied = await applyDateFilter(dateFilter);
+    // Apply date filter if provided (single date)
+    if (dateFilter && dateFilter.date) {
+      const filterApplied = await applySingleDateFilter(dateFilter.date);
       if (!filterApplied) {
         debugLog(' Warning: Date filter may not have been applied correctly');
       }
-      isFilterActive = true;
       // Wait longer for filtered results to load
       await sleep(3000);
     }
 
-    // Get shipped count and validate maxOrders
-    const shippedCount = getShippedCount();
-    // When filter is active, use the filtered count to calculate pages
-    const actualMax = isFilterActive ? shippedCount : Math.min(maxOrders, shippedCount);
-    debugLog(' Shipped count:', shippedCount, ', Requested:', maxOrders, ', Will collect up to:', actualMax);
-    if (isFilterActive) {
-      debugLog(' DATE FILTER ACTIVE - will collect', shippedCount, 'filtered orders');
-    }
+    // Scroll down to bottom slowly (human-like) to ensure all orders are loaded
+    debugLog(' Scrolling down to load all orders...');
+    await smoothScrollToBottom();
+    await sleep(1500);
 
-    // Scroll to bottom to ensure pagination is loaded
-    window.scrollTo(0, document.body.scrollHeight);
-    await sleep(1000);
+    // Scroll back to top
     window.scrollTo(0, 0);
-    await sleep(800);
+    await sleep(1000);
 
-    // Calculate pages based on filtered count (not unlimited)
-    // Each page has 20 orders
-    const pagesNeeded = Math.min(Math.ceil(actualMax / 20), 100); // Max 100 pages safety
-    debugLog(' Will check up to', pagesNeeded, 'pages');
-
-    // Collect from page 1
-    collectOrdersFromPage(orderIds, orderPattern, actualMax);
-    debugLog(' Page 1 collected:', orderIds.length, 'orders');
-
-    // If no orders found on page 1, wait more and retry
-    if (orderIds.length === 0) {
-      debugLog(' No orders on page 1, waiting more...');
-      await sleep(3000);
-      collectOrdersFromPage(orderIds, orderPattern, actualMax);
-      debugLog(' Page 1 retry:', orderIds.length, 'orders');
+    // If page > 1, navigate to that page first
+    if (pageNumber > 1) {
+      debugLog(' Navigating to page', pageNumber);
+      const clicked = await clickPage(pageNumber);
+      if (!clicked) {
+        debugLog(' FAILED to click page', pageNumber);
+        isCollecting = false;
+        return [];
+      }
+      // Wait for page content to load
+      await sleep(2500);
+      window.scrollTo(0, 0);
+      await sleep(500);
     }
 
-    // Track consecutive empty pages (to stop when filter shows no more results)
-    let consecutiveEmptyPages = 0;
+    // Collect orders from current page only (max 20 per page)
+    collectOrdersFromPage(orderIds, orderPattern, 20);
+    debugLog(' Page', pageNumber, 'collected:', orderIds.length, 'orders');
 
-    // Go through more pages
-    for (let page = 2; page <= pagesNeeded; page++) {
-      // Stop when we have all orders
-      if (orderIds.length >= actualMax) {
-        debugLog(' Collected all', actualMax, 'orders, stopping');
-        break;
-      }
-
-      debugLog(' --- Attempting page', page, '---');
-
-      // Scroll to pagination
-      window.scrollTo(0, document.body.scrollHeight);
-      await sleep(500);
-
-      // Click the page number using aria-label
-      const clicked = await clickPage(page);
-      if (!clicked) {
-        debugLog(' FAILED to click page', page, '- stopping pagination');
-        break;
-      }
-
-      // Wait for page to load new content - LONGER WAIT for proper loading
-      debugLog(' Waiting for page', page, 'to load...');
-      await sleep(isFilterActive ? 2500 : 1800);
-
-      // Scroll back up to see orders
-      window.scrollTo(0, 0);
-      await sleep(600);
-
-      // Collect orders from this page
-      const before = orderIds.length;
-      collectOrdersFromPage(orderIds, orderPattern, actualMax);
-      const newCount = orderIds.length - before;
-      debugLog(' Page', page, ':', newCount, 'new orders, total:', orderIds.length);
-
-      // Track empty pages
-      if (newCount === 0) {
-        consecutiveEmptyPages++;
-        debugLog(' Empty page count:', consecutiveEmptyPages);
-        // Stop after 2 consecutive empty pages (handles filter edge cases)
-        if (consecutiveEmptyPages >= 2) {
-          debugLog(' 2 consecutive empty pages - all orders collected');
-          break;
-        }
-      } else {
-        consecutiveEmptyPages = 0;
-      }
+    // If no orders found, wait more and retry once
+    if (orderIds.length === 0) {
+      debugLog(' No orders found, waiting more...');
+      await sleep(3000);
+      collectOrdersFromPage(orderIds, orderPattern, 20);
+      debugLog(' Retry:', orderIds.length, 'orders');
     }
 
     debugLog(' ========================================');
-    debugLog(' TOTAL COLLECTED:', orderIds.length, 'order IDs');
+    debugLog(' Page', pageNumber, 'collected:', orderIds.length, 'order IDs');
     debugLog(' ========================================');
 
   } finally {
@@ -253,6 +204,19 @@ async function collectOrderIds(maxOrders = 100, dateFilter = null) {
   }
 
   return orderIds;
+}
+
+/**
+ * Apply single date filter (same date for start and end)
+ */
+async function applySingleDateFilter(dateStr) {
+  debugLog(' Applying single date filter:', dateStr);
+
+  // Use the same date for both start and end
+  return await applyDateFilter({
+    startDate: dateStr,
+    endDate: dateStr
+  });
 }
 
 /**
@@ -614,6 +578,46 @@ function extractTextsFromContainer(container) {
 }
 
 /**
+ * Dismiss privacy protection modal if it appears
+ * This modal shows "To better protect our customers' privacy..."
+ * We click "Cancel" to dismiss it
+ */
+async function dismissPrivacyModal() {
+  // Look for the modal with "Cancel" button
+  const cancelButtons = document.querySelectorAll('button');
+  for (const btn of cancelButtons) {
+    const text = btn.textContent?.trim();
+    if (text === 'Cancel' || text === 'cancel') {
+      // Check if this is inside a modal (parent has overlay/modal class or fixed position)
+      const parent = btn.closest('[class*="modal"], [class*="dialog"], [class*="overlay"], [role="dialog"]');
+      if (parent || btn.closest('div[style*="position: fixed"]')) {
+        debugLog(' Found privacy modal, clicking Cancel...');
+        btn.click();
+        await sleep(300);
+        return true;
+      }
+    }
+  }
+
+  // Alternative: Look for modal by its content
+  const modalText = document.body.innerText;
+  if (modalText.includes('better protect our customers') || modalText.includes('privacy and create a healthy')) {
+    // Find and click Cancel button
+    const allButtons = document.querySelectorAll('button, [role="button"]');
+    for (const btn of allButtons) {
+      if (btn.textContent?.trim() === 'Cancel') {
+        debugLog(' Dismissing privacy modal via text match...');
+        btn.click();
+        await sleep(300);
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
  * Click reveal buttons (eye icons)
  */
 async function clickRevealButtons() {
@@ -624,12 +628,17 @@ async function clickRevealButtons() {
   await scrollToShippingAddress();
   await sleep(500);
 
+  // First, dismiss any existing privacy modal
+  await dismissPrivacyModal();
+
   // Method 1: SVGs with data-log_click_for="open_phone_plaintext"
   const revealIcons = document.querySelectorAll('svg[data-log_click_for="open_phone_plaintext"]');
   for (const icon of revealIcons) {
     if (simulateClick(icon)) {
       clickedCount++;
       await sleep(500);
+      // Check and dismiss privacy modal if it appeared
+      await dismissPrivacyModal();
     }
   }
 
@@ -641,6 +650,8 @@ async function clickRevealButtons() {
       icon.dataset.clicked = 'true';
       clickedCount++;
       await sleep(500);
+      // Check and dismiss privacy modal if it appeared
+      await dismissPrivacyModal();
     }
   }
 
@@ -660,11 +671,16 @@ async function clickRevealButtons() {
             svg.dataset.clicked = 'true';
             clickedCount++;
             await sleep(500);
+            // Check and dismiss privacy modal if it appeared
+            await dismissPrivacyModal();
           }
         }
       }
     }
   }
+
+  // Final check for any remaining modal
+  await dismissPrivacyModal();
 
   debugLog(' Clicked', clickedCount, 'reveal buttons');
   return clickedCount;
@@ -1040,6 +1056,30 @@ function extractItemsAndSku() {
     items: uniqueItems.slice(0, 3).join(' | '),
     skuId: uniqueSkus.slice(0, 3).join(', ')
   };
+}
+
+/**
+ * Smooth scroll to bottom (human-like scrolling)
+ * Scrolls in multiple steps instead of instant jump
+ */
+async function smoothScrollToBottom() {
+  const scrollHeight = document.body.scrollHeight;
+  const viewportHeight = window.innerHeight;
+  const scrollSteps = 5; // Number of scroll steps
+  const stepDelay = 300; // Delay between steps (ms)
+
+  for (let i = 1; i <= scrollSteps; i++) {
+    const targetY = Math.min((scrollHeight / scrollSteps) * i, scrollHeight - viewportHeight);
+    window.scrollTo({
+      top: targetY,
+      behavior: 'smooth'
+    });
+    await sleep(stepDelay);
+  }
+
+  // Final scroll to absolute bottom
+  window.scrollTo(0, document.body.scrollHeight);
+  await sleep(500);
 }
 
 /**

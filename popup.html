@@ -677,6 +677,40 @@
     .license-info-value.warning {
       color: #d32f2f;
     }
+
+    /* Page and Order Progress Display */
+    .page-order-progress {
+      display: flex;
+      justify-content: center;
+      gap: 30px;
+      margin-bottom: 12px;
+      padding: 10px;
+      background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
+      border-radius: 8px;
+      border: 1px solid rgba(102, 126, 234, 0.2);
+    }
+
+    .progress-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .progress-label {
+      font-size: 12px;
+      color: #666;
+      font-weight: 500;
+    }
+
+    .progress-value {
+      font-size: 16px;
+      font-weight: 700;
+      color: #667eea;
+      background: white;
+      padding: 4px 12px;
+      border-radius: 6px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
   </style>
 </head>
 <body>
@@ -710,6 +744,17 @@
 
       <!-- Progress Section - Always visible when has data -->
       <div class="progress-section" id="progressSection">
+        <!-- Page and Order Progress Display -->
+        <div class="page-order-progress" id="pageOrderProgress">
+          <div class="progress-item">
+            <span class="progress-label">Page:</span>
+            <span class="progress-value" id="pageProgress">1/1</span>
+          </div>
+          <div class="progress-item">
+            <span class="progress-label">Order:</span>
+            <span class="progress-value" id="orderProgress">0/0</span>
+          </div>
+        </div>
         <div class="progress-bar">
           <div class="progress-fill" id="progressFill"></div>
         </div>
@@ -753,6 +798,9 @@
 
       <!-- Running State Buttons -->
       <div class="btn-group" id="runningBtns" style="display: none;">
+        <button class="btn btn-warning" id="pauseBtn">
+          <span>⏸</span> Pause
+        </button>
         <button class="btn btn-danger" id="stopBtn">
           <span>⏹</span> Stop
         </button>
@@ -761,6 +809,16 @@
         </button>
         <button class="btn btn-primary" id="downloadXlsxBtn">
           <span>📊</span> Excel
+        </button>
+      </div>
+
+      <!-- Paused State Buttons -->
+      <div class="btn-group" id="pausedBtns" style="display: none;">
+        <button class="btn btn-success" id="resumePausedBtn">
+          <span>▶️</span> Resume
+        </button>
+        <button class="btn btn-danger" id="stopPausedBtn">
+          <span>⏹</span> Stop
         </button>
       </div>
 
@@ -785,36 +843,21 @@
 
       <!-- Settings Section -->
       <div class="settings-section" id="settingsSection">
-        <div class="setting-row">
-          <span class="setting-label">Orders to export:</span>
-          <input type="number" class="setting-input" id="maxOrders" value="100" min="1" max="10000">
-        </div>
-        <div class="setting-row">
-          <span class="setting-label">Delay (seconds):</span>
-          <div class="delay-inputs">
-            <input type="number" class="setting-input" id="delayMin" value="2" min="1" max="30" step="0.5">
-            <span>to</span>
-            <input type="number" class="setting-input" id="delayMax" value="6" min="1" max="30" step="0.5">
-          </div>
-        </div>
-        <!-- Date Range Filter (REQUIRED) -->
+        <!-- Date Filter (Single Date - Always Visible) -->
         <div class="date-filter-section">
           <div class="setting-row">
-            <span class="setting-label">📅 Date Filter<span class="required-badge">REQUIRED</span></span>
-            <label class="toggle-switch">
-              <input type="checkbox" id="enableDateFilter">
-              <span class="toggle-slider"></span>
-            </label>
+            <span class="setting-label">📅 Date:</span>
+            <input type="date" class="date-input" id="filterDate" style="flex: 1;">
           </div>
-          <div class="date-range-inputs" id="dateRangeInputs" style="display: none;">
-            <div class="date-input-row">
-              <label>From:</label>
-              <input type="date" class="date-input" id="filterStartDate">
-            </div>
-            <div class="date-input-row">
-              <label>To:</label>
-              <input type="date" class="date-input" id="filterEndDate">
-            </div>
+        </div>
+
+        <!-- Page Range -->
+        <div class="setting-row">
+          <span class="setting-label">📄 Pages:</span>
+          <div class="delay-inputs">
+            <input type="number" class="setting-input" id="startPage" value="1" min="1" max="100">
+            <span>to</span>
+            <input type="number" class="setting-input" id="endPage" value="1" min="1" max="100">
           </div>
         </div>
       </div>
@@ -832,7 +875,7 @@
     </div>
 
     <div class="footer">
-      v2.9.7 - Fixed Days Count
+      v3.0.3 - Auto-dismiss Privacy Modal
     </div>
   </div>
 
