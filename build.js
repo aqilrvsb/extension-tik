@@ -20,35 +20,35 @@ const copyFiles = [
   'lib/xlsx.full.min.js'
 ];
 
-// Obfuscation options - strong protection
+// Obfuscation options - balanced protection that preserves functionality
+// Key: Disable string transformations that break executeScript callbacks
 const obfuscatorOptions = {
   compact: true,
   controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.75,
+  controlFlowFlatteningThreshold: 0.5,
   deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.4,
+  deadCodeInjectionThreshold: 0.3,
   debugProtection: false,
   disableConsoleOutput: false,
   identifierNamesGenerator: 'hexadecimal',
   log: false,
   numbersToExpressions: true,
   renameGlobals: false,
-  selfDefending: true,
+  selfDefending: false, // Disable - can cause issues with chrome extension context
   simplify: true,
-  splitStrings: true,
-  splitStringsChunkLength: 10,
-  stringArray: true,
-  stringArrayCallsTransform: true,
-  stringArrayEncoding: ['base64'],
-  stringArrayIndexShift: true,
-  stringArrayRotate: true,
-  stringArrayShuffle: true,
-  stringArrayWrappersCount: 2,
-  stringArrayWrappersChainedCalls: true,
-  stringArrayWrappersParametersMaxCount: 4,
-  stringArrayWrappersType: 'function',
-  stringArrayThreshold: 0.75,
-  transformObjectKeys: true,
+  // IMPORTANT: Disable string transformations - they break executeScript callbacks
+  // because the callback is serialized and runs in page context without access to string array
+  splitStrings: false,
+  stringArray: false,
+  stringArrayCallsTransform: false,
+  stringArrayEncoding: [],
+  stringArrayIndexShift: false,
+  stringArrayRotate: false,
+  stringArrayShuffle: false,
+  stringArrayWrappersCount: 0,
+  stringArrayWrappersChainedCalls: false,
+  stringArrayThreshold: 0,
+  transformObjectKeys: false, // Disable - can break object property access
   unicodeEscapeSequence: false
 };
 
