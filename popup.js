@@ -87,32 +87,39 @@ async function getCurrentShopCode() {
         const results = await chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
-            // Method 1: Look for "Shop Code: XXXXX" in any element (exact match)
-            const allDivs = document.querySelectorAll('div');
-            for (const div of allDivs) {
-              const text = div.textContent?.trim();
-              if (text && text.startsWith('Shop Code:')) {
-                const code = text.replace('Shop Code:', '').trim();
-                if (code && code.length >= 8) return code;
+            // Method 1: Look for "Shop Code: XXXXX" text anywhere in page
+            const bodyText = document.body.innerText;
+            const shopCodeMatch = bodyText.match(/Shop\s*Code[:\s]+([A-Z0-9]{8,12})/i);
+            if (shopCodeMatch) return shopCodeMatch[1];
+
+            // Method 2: Look for spans/divs containing shop code pattern near "Shop Code" text
+            const allElements = document.querySelectorAll('span, div, p');
+            for (const el of allElements) {
+              const text = el.textContent?.trim();
+              // Look for element that contains "Shop Code:" followed by the code
+              if (text && /Shop\s*Code/i.test(text)) {
+                const codeMatch = text.match(/([A-Z]{2}[A-Z0-9]{6,10})/);
+                if (codeMatch) return codeMatch[1];
               }
             }
-
-            // Method 2: Look for Shop Code text using regex
-            const shopCodeMatch = document.body.innerText.match(/Shop Code:\s*([A-Z0-9]+)/i);
-            if (shopCodeMatch) return shopCodeMatch[1];
 
             // Method 3: Look in URL params
             const urlMatch = window.location.href.match(/shop_code=([A-Z0-9]+)/i);
             if (urlMatch) return urlMatch[1];
 
-            // Method 4: Look for data attribute or specific element
+            // Method 4: Look for MY-prefixed shop codes (Malaysia TikTok Shop pattern)
+            const myCodeMatch = bodyText.match(/\b(MY[A-Z0-9]{6,10})\b/);
+            if (myCodeMatch) return myCodeMatch[0];
+
+            // Method 5: Look in page HTML for shop code pattern
+            const pageHtml = document.body.innerHTML;
+            // Match shop codes like MYLCV9LW68 (2 letter prefix + alphanumeric)
+            const htmlCodeMatch = pageHtml.match(/\b([A-Z]{2}[A-Z0-9]{6,10})\b/);
+            if (htmlCodeMatch) return htmlCodeMatch[1];
+
+            // Method 6: Look for data attribute
             const shopElement = document.querySelector('[data-shop-code]');
             if (shopElement) return shopElement.getAttribute('data-shop-code');
-
-            // Method 5: Look in page HTML for MY shop code pattern
-            const pageHtml = document.body.innerHTML;
-            const codePattern = pageHtml.match(/MY[A-Z0-9]{8,10}/);
-            if (codePattern) return codePattern[0];
 
             return null;
           }
